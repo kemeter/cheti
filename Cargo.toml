@@ -13,3 +13,9 @@ categories = ["cryptography", "network-programming"]
 [dependencies]
 
 [dev-dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
