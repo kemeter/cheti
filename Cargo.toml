@@ -11,6 +11,8 @@ keywords = ["acme", "letsencrypt", "dns", "tls", "certificate"]
 categories = ["cryptography", "network-programming"]
 
 [dependencies]
+thiserror = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
 [dev-dependencies]
 
