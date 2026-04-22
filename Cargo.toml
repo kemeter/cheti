@@ -1,0 +1,15 @@
+[package]
+name = "cheti"
+version = "0.1.0"
+edition = "2021"
+authors = ["Mlanawo Mbechezi <mlanawo.mbechezi@kemeter.io>"]
+license = "MIT"
+description = "ACME DNS-01 challenge library with pluggable DNS providers"
+repository = "https://github.com/kemeter/cheti"
+readme = "README.md"
+keywords = ["acme", "letsencrypt", "dns", "tls", "certificate"]
+categories = ["cryptography", "network-programming"]
+
+[dependencies]
+
+[dev-dependencies]
