@@ -1,5 +1,11 @@
 use thiserror::Error;
 
+/// Errors returned by the DNS provider layer.
+///
+/// Some variants may contain provider-supplied strings (API responses,
+/// resolver messages). Callers should not log these verbatim to
+/// user-facing output without redaction, as they may occasionally include
+/// sensitive context returned by the upstream API.
 #[derive(Debug, Error)]
 pub enum DnsError {
     #[error("authentication failed: {0}")]

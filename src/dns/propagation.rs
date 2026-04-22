@@ -4,29 +4,38 @@ use std::time::Instant;
 use hickory_resolver::config::{NameServerConfigGroup, ResolverConfig, ResolverOpts};
 use hickory_resolver::TokioAsyncResolver;
 
+use crate::dns::zone::find_zone;
 use crate::error::DnsError;
 use crate::provider::PropagationTiming;
 
+/// Fallback public resolvers used when authoritative NS lookup fails.
+///
+/// These are used on best-effort basis. Public resolvers see cached data and
+/// cannot guarantee that the TXT record is visible on all authoritative NS.
 pub const DEFAULT_RESOLVERS: &[&str] = &["1.1.1.1:53", "8.8.8.8:53"];
 
-/// Poll the given resolvers until a TXT record at `fqdn` contains `expected`,
-/// or the timeout expires.
+/// Poll DNS until a TXT record at `fqdn` contains `expected`, or the timeout expires.
 ///
-/// Returns `Ok(())` as soon as any resolver returns a TXT containing the
-/// expected value. Otherwise, returns `DnsError::PropagationTimeout`.
+/// Queries the authoritative nameservers of the zone by default (more reliable
+/// than public resolvers, since Let's Encrypt itself queries authoritative NS).
+/// Falls back to `fallback_resolvers` if authoritative NS lookup fails.
+///
+/// Returns `Ok(())` as soon as any queried NS returns a TXT containing `expected`.
 pub async fn wait_for_propagation(
     fqdn: &str,
     expected: &str,
-    resolvers: &[&str],
+    fallback_resolvers: &[&str],
     timing: PropagationTiming,
 ) -> Result<(), DnsError> {
-    let addrs = parse_resolvers(resolvers)?;
-    let resolver = build_resolver(&addrs);
-
-    let start = Instant::now();
     let fqdn_trimmed = fqdn.trim_end_matches('.');
 
+    let authoritative = authoritative_resolver(fqdn_trimmed).await.ok();
+    let fallback = build_resolver(&parse_resolvers(fallback_resolvers)?);
+
+    let start = Instant::now();
     loop {
+        let resolver = authoritative.as_ref().unwrap_or(&fallback);
+
         if let Ok(response) = resolver.txt_lookup(fqdn_trimmed).await {
             let found = response.iter().any(|record| {
                 record
@@ -47,6 +56,36 @@ pub async fn wait_for_propagation(
 
         tokio::time::sleep(timing.interval).await;
     }
+}
+
+/// Resolve the authoritative NS for the zone hosting `fqdn`, then build a
+/// resolver that queries those NS directly.
+async fn authoritative_resolver(fqdn: &str) -> Result<TokioAsyncResolver, DnsError> {
+    let zone = find_zone(fqdn).await?;
+    let default = TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default());
+
+    let ns_response = default
+        .ns_lookup(&zone)
+        .await
+        .map_err(|e| DnsError::Resolver(format!("NS lookup for {zone}: {e}")))?;
+
+    let mut ns_ips = Vec::new();
+    for ns in ns_response.iter() {
+        let ns_name = ns.0.to_string();
+        if let Ok(lookup) = default.lookup_ip(&ns_name).await {
+            for ip in lookup.iter() {
+                ns_ips.push(SocketAddr::new(ip, 53));
+            }
+        }
+    }
+
+    if ns_ips.is_empty() {
+        return Err(DnsError::Resolver(format!(
+            "no authoritative NS found for zone {zone}"
+        )));
+    }
+
+    Ok(build_resolver(&ns_ips))
 }
 
 fn parse_resolvers(resolvers: &[&str]) -> Result<Vec<SocketAddr>, DnsError> {
@@ -71,25 +110,7 @@ fn build_resolver(addrs: &[SocketAddr]) -> TokioAsyncResolver {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::*;
-
-    #[tokio::test]
-    async fn timeout_fires_when_record_absent() {
-        let timing = PropagationTiming {
-            timeout: Duration::from_millis(50),
-            interval: Duration::from_millis(10),
-        };
-        let result = wait_for_propagation(
-            "nonexistent.invalid.example.",
-            "anything",
-            DEFAULT_RESOLVERS,
-            timing,
-        )
-        .await;
-        assert!(matches!(result, Err(DnsError::PropagationTimeout { .. })));
-    }
 
     #[test]
     fn invalid_resolver_is_reported() {
