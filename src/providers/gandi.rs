@@ -8,13 +8,15 @@ use crate::dns::find_zone;
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
-    api_error, encode_path, relative_name, validate_fqdn, validate_https_base,
+    api_error, encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
+    KeyedMutex,
 };
 
 const GANDI_API_BASE: &str = "https://api.gandi.net/v5";
 const ENV_TOKEN: &str = "GANDIV5_PERSONAL_ACCESS_TOKEN";
 const DEFAULT_TTL: u32 = 300;
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const PROVIDER: &str = "gandi";
 
 pub struct GandiConfig {
@@ -41,15 +43,21 @@ impl GandiConfig {
 pub struct GandiProvider {
     config: GandiConfig,
     http: reqwest::Client,
+    locks: KeyedMutex,
 }
 
 impl GandiProvider {
     pub fn new(config: GandiConfig) -> Result<Self, DnsError> {
         let http = reqwest::Client::builder()
             .timeout(HTTP_TIMEOUT)
+            .connect_timeout(CONNECT_TIMEOUT)
             .build()
             .map_err(DnsError::Http)?;
-        Ok(Self { config, http })
+        Ok(Self {
+            config,
+            http,
+            locks: KeyedMutex::new(),
+        })
     }
 
     pub fn from_env() -> Result<Self, DnsError> {
@@ -165,9 +173,12 @@ struct TxtRecordBody {
 impl DnsProvider for GandiProvider {
     async fn present(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
         validate_fqdn(fqdn)?;
+        validate_acme_value(value)?;
         let zone = find_zone(fqdn).await?;
-        let rname = relative_name(fqdn, &zone);
+        validate_fqdn(&zone)?;
+        let rname = relative_name(fqdn, &zone)?;
 
+        let _guard = self.locks.lock(&format!("{zone}|{rname}")).await;
         let mut values = self.fetch_existing(&zone, &rname).await?;
         let owned_value = value.to_string();
         if !values.contains(&owned_value) {
@@ -179,8 +190,10 @@ impl DnsProvider for GandiProvider {
     async fn cleanup(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
         validate_fqdn(fqdn)?;
         let zone = find_zone(fqdn).await?;
-        let rname = relative_name(fqdn, &zone);
+        validate_fqdn(&zone)?;
+        let rname = relative_name(fqdn, &zone)?;
 
+        let _guard = self.locks.lock(&format!("{zone}|{rname}")).await;
         let values = self.fetch_existing(&zone, &rname).await?;
         let remaining: Vec<String> = values.into_iter().filter(|v| v != value).collect();
 

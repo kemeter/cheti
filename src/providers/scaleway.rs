@@ -8,13 +8,15 @@ use crate::dns::find_zone;
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
-    api_error, encode_path, relative_name, validate_fqdn, validate_https_base,
+    api_error, encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
+    KeyedMutex,
 };
 
 const SCW_API_BASE: &str = "https://api.scaleway.com";
 const ENV_SECRET_KEY: &str = "SCW_SECRET_KEY";
 const DEFAULT_TTL: u32 = 300;
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const PROVIDER: &str = "scaleway";
 
 pub struct ScalewayConfig {
@@ -41,15 +43,21 @@ impl ScalewayConfig {
 pub struct ScalewayProvider {
     config: ScalewayConfig,
     http: reqwest::Client,
+    locks: KeyedMutex,
 }
 
 impl ScalewayProvider {
     pub fn new(config: ScalewayConfig) -> Result<Self, DnsError> {
         let http = reqwest::Client::builder()
             .timeout(HTTP_TIMEOUT)
+            .connect_timeout(CONNECT_TIMEOUT)
             .build()
             .map_err(DnsError::Http)?;
-        Ok(Self { config, http })
+        Ok(Self {
+            config,
+            http,
+            locks: KeyedMutex::new(),
+        })
     }
 
     pub fn from_env() -> Result<Self, DnsError> {
@@ -227,9 +235,12 @@ struct RecordSpec {
 impl DnsProvider for ScalewayProvider {
     async fn present(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
         validate_fqdn(fqdn)?;
+        validate_acme_value(value)?;
         let zone = find_zone(fqdn).await?;
-        let rname = relative_name(fqdn, &zone);
+        validate_fqdn(&zone)?;
+        let rname = relative_name(fqdn, &zone)?;
 
+        let _guard = self.locks.lock(&format!("{zone}|{rname}")).await;
         let mut values = self.fetch_existing(&zone, &rname).await?;
         let owned_value = value.to_string();
         if !values.contains(&owned_value) {
@@ -241,8 +252,10 @@ impl DnsProvider for ScalewayProvider {
     async fn cleanup(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
         validate_fqdn(fqdn)?;
         let zone = find_zone(fqdn).await?;
-        let rname = relative_name(fqdn, &zone);
+        validate_fqdn(&zone)?;
+        let rname = relative_name(fqdn, &zone)?;
 
+        let _guard = self.locks.lock(&format!("{zone}|{rname}")).await;
         let values = self.fetch_existing(&zone, &rname).await?;
         let remaining: Vec<String> = values.into_iter().filter(|v| v != value).collect();
 
