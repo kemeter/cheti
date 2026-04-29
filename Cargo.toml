@@ -19,6 +19,7 @@ serde = { version = "1", features = ["derive"] }
 secrecy = "0.10"
 url = "2"
 percent-encoding = "2"
+instant-acme = "0.8"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

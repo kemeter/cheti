@@ -29,6 +29,24 @@ pub enum DnsError {
     #[error("resolver error: {0}")]
     Resolver(String),
 
+    #[error("ACME error: {0}")]
+    Acme(String),
+
+    #[error("no DNS-01 challenge offered for {0}")]
+    NoDns01Challenge(String),
+
+    #[error("ACME order is {0}, expected Ready")]
+    UnexpectedOrderStatus(String),
+
+    #[error("ACME challenge invalid for {0}")]
+    ChallengeInvalid(String),
+
     #[error("other: {0}")]
     Other(String),
+}
+
+impl From<instant_acme::Error> for DnsError {
+    fn from(e: instant_acme::Error) -> Self {
+        DnsError::Acme(e.to_string())
+    }
 }
