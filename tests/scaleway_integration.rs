@@ -93,8 +93,10 @@ async fn present_merges_with_existing_values() {
             let body: Value = serde_json::from_slice(&req.body).unwrap();
             let records = set_change_records(&body);
             assert_eq!(records.len(), 2);
-            let datas: Vec<&str> =
-                records.iter().map(|r| r["data"].as_str().unwrap()).collect();
+            let datas: Vec<&str> = records
+                .iter()
+                .map(|r| r["data"].as_str().unwrap())
+                .collect();
             assert!(datas.contains(&OTHER_VALUE));
             assert!(datas.contains(&VALUE));
             ResponseTemplate::new(200)
@@ -158,7 +160,10 @@ async fn cleanup_deletes_record_when_no_values_remain() {
         .and(path(RECORDS_PATH))
         .respond_with(move |req: &Request| {
             let body: Value = serde_json::from_slice(&req.body).unwrap();
-            assert!(is_delete_change(&body), "expected delete change, got {body}");
+            assert!(
+                is_delete_change(&body),
+                "expected delete change, got {body}"
+            );
             ResponseTemplate::new(200)
         })
         .expect(1)
