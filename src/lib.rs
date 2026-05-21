@@ -1,4 +1,7 @@
 //! Cheti — ACME DNS-01 challenge library with pluggable DNS providers.
+//!
+//! See [the README](https://github.com/kemeter/cheti) for usage examples.
+#![doc = include_str!("../README.md")]
 
 pub mod account_store;
 pub mod dns;
