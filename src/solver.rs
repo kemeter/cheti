@@ -100,10 +100,7 @@ impl<P: DnsProvider> Dns01Solver<P> {
     /// Drive the order from Pending to a certificate. Returns
     /// `(certificate_chain_pem, private_key_pem)`. Cleanup of placed TXT
     /// records is best-effort and runs even on error paths.
-    pub async fn solve_and_finalize(
-        &self,
-        order: Order,
-    ) -> Result<(String, String), DnsError> {
+    pub async fn solve_and_finalize(&self, order: Order) -> Result<(String, String), DnsError> {
         let driver = InstantAcmeDriver::new(order);
         self.solve_with_driver(driver).await
     }
@@ -136,7 +133,11 @@ impl<P: DnsProvider> Dns01Solver<P> {
                 }
             };
 
-            if let Err(e) = self.provider.present(&challenge.fqdn, &challenge.dns_value).await {
+            if let Err(e) = self
+                .provider
+                .present(&challenge.fqdn, &challenge.dns_value)
+                .await
+            {
                 self.cleanup_all(&placed).await;
                 return Err(e);
             }
@@ -533,8 +534,8 @@ mod tests {
             }
         }
 
-        let solver = Dns01Solver::new(ArcProvider(provider.clone()))
-            .skip_propagation_check(Duration::ZERO);
+        let solver =
+            Dns01Solver::new(ArcProvider(provider.clone())).skip_propagation_check(Duration::ZERO);
         let result = solver.solve_with_driver(driver).await;
         assert!(matches!(result, Err(DnsError::Api(_))));
 
@@ -576,8 +577,8 @@ mod tests {
             }
         }
 
-        let solver = Dns01Solver::new(ArcProvider(provider.clone()))
-            .skip_propagation_check(Duration::ZERO);
+        let solver =
+            Dns01Solver::new(ArcProvider(provider.clone())).skip_propagation_check(Duration::ZERO);
         let result = solver.solve_with_driver(driver).await;
         assert!(matches!(result, Err(DnsError::Acme(_))));
 
@@ -610,8 +611,8 @@ mod tests {
             }
         }
 
-        let solver = Dns01Solver::new(ArcProvider(provider.clone()))
-            .skip_propagation_check(Duration::ZERO);
+        let solver =
+            Dns01Solver::new(ArcProvider(provider.clone())).skip_propagation_check(Duration::ZERO);
         let result = solver.solve_with_driver(driver).await;
         assert!(matches!(result, Err(DnsError::Acme(_))));
         assert_eq!(
@@ -645,8 +646,8 @@ mod tests {
             }
         }
 
-        let solver = Dns01Solver::new(ArcProvider(provider.clone()))
-            .skip_propagation_check(Duration::ZERO);
+        let solver =
+            Dns01Solver::new(ArcProvider(provider.clone())).skip_propagation_check(Duration::ZERO);
         let (cert, _) = solver.solve_with_driver(driver).await.unwrap();
         assert_eq!(cert, "CERT");
 
@@ -655,10 +656,7 @@ mod tests {
             provider.presented_fqdns(),
             vec!["_acme-challenge.a.example"]
         );
-        assert_eq!(
-            provider.cleaned_fqdns(),
-            vec!["_acme-challenge.a.example"]
-        );
+        assert_eq!(provider.cleaned_fqdns(), vec!["_acme-challenge.a.example"]);
     }
 
     #[tokio::test]
@@ -685,8 +683,8 @@ mod tests {
             }
         }
 
-        let solver = Dns01Solver::new(ArcProvider(provider.clone()))
-            .skip_propagation_check(Duration::ZERO);
+        let solver =
+            Dns01Solver::new(ArcProvider(provider.clone())).skip_propagation_check(Duration::ZERO);
         let result = solver.solve_with_driver(driver).await;
         assert!(matches!(result, Err(DnsError::Acme(_))));
         assert_eq!(

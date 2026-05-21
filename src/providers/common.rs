@@ -110,15 +110,14 @@ pub(crate) fn relative_name(fqdn: &str, zone: &str) -> Result<String, DnsError> 
         return Ok("@".to_string());
     }
     let suffix = format!(".{zone}");
-    fqdn.strip_suffix(&suffix).map(str::to_string).ok_or_else(|| {
-        DnsError::Other(format!("fqdn {fqdn} is not within zone {zone}"))
-    })
+    fqdn.strip_suffix(&suffix)
+        .map(str::to_string)
+        .ok_or_else(|| DnsError::Other(format!("fqdn {fqdn} is not within zone {zone}")))
 }
 
 pub(crate) fn validate_https_base(base: &str, provider: &str) -> Result<(), DnsError> {
-    let parsed = Url::parse(base).map_err(|_| {
-        DnsError::Other(format!("{provider} api_base is not a valid URL: {base}"))
-    })?;
+    let parsed = Url::parse(base)
+        .map_err(|_| DnsError::Other(format!("{provider} api_base is not a valid URL: {base}")))?;
     let scheme_ok = parsed.scheme() == "https"
         || (parsed.scheme() == "http"
             && matches!(
