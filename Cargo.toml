@@ -23,6 +23,8 @@ instant-acme = "0.8"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+wiremock = "0.6"
+serde_json = "1"
 
 [lints.rust]
 unsafe_code = "forbid"
