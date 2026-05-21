@@ -9,7 +9,7 @@ use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
     api_error, encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
-    KeyedMutex,
+    validate_zone, KeyedMutex,
 };
 
 const SCW_API_BASE: &str = "https://api.scaleway.com";
@@ -22,6 +22,7 @@ const PROVIDER: &str = "scaleway";
 pub struct ScalewayConfig {
     secret_key: SecretString,
     api_base: String,
+    zone_override: Option<String>,
 }
 
 impl ScalewayConfig {
@@ -29,6 +30,7 @@ impl ScalewayConfig {
         Self {
             secret_key: SecretString::new(secret_key.into().into()),
             api_base: SCW_API_BASE.to_string(),
+            zone_override: None,
         }
     }
 
@@ -36,6 +38,16 @@ impl ScalewayConfig {
         let base = api_base.into();
         validate_https_base(&base, PROVIDER)?;
         self.api_base = base;
+        Ok(self)
+    }
+
+    /// Skip the SOA lookup and use `zone` directly. Useful when the caller
+    /// already knows the apex (avoids a DNS round-trip) or in tests that
+    /// don't have a real resolver. The given fqdn must be at-or-below `zone`.
+    pub fn with_zone(mut self, zone: impl Into<String>) -> Result<Self, DnsError> {
+        let zone = zone.into();
+        validate_zone(&zone)?;
+        self.zone_override = Some(zone);
         Ok(self)
     }
 }
@@ -232,12 +244,24 @@ struct RecordSpec {
     ttl: u32,
 }
 
+impl ScalewayProvider {
+    async fn resolve_zone(&self, fqdn: &str) -> Result<String, DnsError> {
+        match &self.config.zone_override {
+            Some(z) => Ok(z.clone()),
+            None => {
+                let zone = find_zone(fqdn).await?;
+                validate_fqdn(&zone)?;
+                Ok(zone)
+            }
+        }
+    }
+}
+
 impl DnsProvider for ScalewayProvider {
     async fn present(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
         validate_fqdn(fqdn)?;
         validate_acme_value(value)?;
-        let zone = find_zone(fqdn).await?;
-        validate_fqdn(&zone)?;
+        let zone = self.resolve_zone(fqdn).await?;
         let rname = relative_name(fqdn, &zone)?;
 
         let _guard = self.locks.lock(&format!("{zone}|{rname}")).await;
@@ -251,8 +275,7 @@ impl DnsProvider for ScalewayProvider {
 
     async fn cleanup(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
         validate_fqdn(fqdn)?;
-        let zone = find_zone(fqdn).await?;
-        validate_fqdn(&zone)?;
+        let zone = self.resolve_zone(fqdn).await?;
         let rname = relative_name(fqdn, &zone)?;
 
         let _guard = self.locks.lock(&format!("{zone}|{rname}")).await;

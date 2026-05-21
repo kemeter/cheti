@@ -74,6 +74,19 @@ pub(crate) fn validate_acme_value(value: &str) -> Result<(), DnsError> {
     Ok(())
 }
 
+/// Same as `validate_fqdn`, but also requires the zone to contain at least one
+/// dot — a single-label "zone" (e.g. `localhost`) is almost certainly a misuse.
+pub(crate) fn validate_zone(zone: &str) -> Result<(), DnsError> {
+    validate_fqdn(zone)?;
+    let trimmed = zone.trim_end_matches('.');
+    if !trimmed.contains('.') {
+        return Err(DnsError::Other(format!(
+            "zone must have at least two labels, got {zone}"
+        )));
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_fqdn(fqdn: &str) -> Result<(), DnsError> {
     let trimmed = fqdn.trim_end_matches('.');
     if trimmed.is_empty() || trimmed.len() > 253 {
