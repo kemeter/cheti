@@ -41,3 +41,45 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --all-targets
+
+  pebble-e2e:
+    runs-on: ubuntu-latest
+    # Pinned by digest. If the upstream image is republished, refresh both
+    # this digest AND tests/data/pebble.minica.pem (which signs the Pebble
+    # WFE's TLS cert and is baked into the image at build time).
+    env:
+      PEBBLE_IMAGE: ghcr.io/letsencrypt/pebble@sha256:ddf230642b1a584f519f32e347de1b05a6e4c1f6c35c1863b33effeab5f78199
+      CHALLTESTSRV_IMAGE: ghcr.io/letsencrypt/pebble-challtestsrv@sha256:12ce21884def456bcf9786542113949e1f19dc7738d2c70e156c2d0c38a1405b
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Start Pebble + challtestsrv
+        run: |
+          docker network create cheti-pebble
+          docker run -d --name cheti-challtestsrv --network cheti-pebble \
+            -p 8053:8053/udp -p 8055:8055 \
+            "$CHALLTESTSRV_IMAGE" \
+            -defaultIPv4 "" -defaultIPv6 "" -dnsserver ":8053" -management ":8055"
+          docker run -d --name cheti-pebble --network cheti-pebble \
+            -p 14000:14000 -p 15000:15000 \
+            -e PEBBLE_VA_NOSLEEP=1 \
+            "$PEBBLE_IMAGE" \
+            -dnsserver cheti-challtestsrv:8053
+          for _ in $(seq 1 30); do
+            if curl -k -s -o /dev/null -w "%{http_code}" https://localhost:14000/dir | grep -q "^200$"; then
+              echo "Pebble ready"
+              exit 0
+            fi
+            sleep 0.5
+          done
+          echo "Pebble failed to start" >&2
+          docker logs cheti-pebble >&2 || true
+          docker logs cheti-challtestsrv >&2 || true
+          exit 1
+      - run: cargo test --test pebble_e2e -- --ignored
+      - name: Stop Pebble + challtestsrv
+        if: always()
+        run: |
+          docker rm -f cheti-pebble cheti-challtestsrv || true
+          docker network rm cheti-pebble || true
