@@ -47,48 +47,49 @@ impl AccountStore for FileAccountStore {
             Ok(b) => b,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => {
-                return Err(DnsError::Other(format!(
+                return Err(DnsError::Storage(format!(
                     "read account store {}: {e}",
                     self.path.display()
                 )));
             }
         };
         let creds: AccountCredentials = serde_json::from_slice(&bytes).map_err(|e| {
-            DnsError::Other(format!("parse account store {}: {e}", self.path.display()))
+            DnsError::Storage(format!("parse account store {}: {e}", self.path.display()))
         })?;
         Ok(Some(creds))
     }
 
     fn save(&self, credentials: &AccountCredentials) -> Result<(), DnsError> {
         let bytes = serde_json::to_vec(credentials)
-            .map_err(|e| DnsError::Other(format!("serialize account credentials: {e}")))?;
+            .map_err(|e| DnsError::Storage(format!("serialize account credentials: {e}")))?;
 
         // Write to a sibling temp file then rename, so a crash mid-write
         // doesn't leave us with a truncated, unreadable file.
         let parent = self.path.parent().ok_or_else(|| {
-            DnsError::Other(format!(
+            DnsError::Storage(format!(
                 "account store path has no parent: {}",
                 self.path.display()
             ))
         })?;
         if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| DnsError::Other(format!("create parent {}: {e}", parent.display())))?;
+            std::fs::create_dir_all(parent).map_err(|e| {
+                DnsError::Storage(format!("create parent {}: {e}", parent.display()))
+            })?;
         }
 
         let tmp = self.path.with_extension("tmp");
         std::fs::write(&tmp, &bytes)
-            .map_err(|e| DnsError::Other(format!("write {}: {e}", tmp.display())))?;
+            .map_err(|e| DnsError::Storage(format!("write {}: {e}", tmp.display())))?;
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))
-                .map_err(|e| DnsError::Other(format!("chmod {}: {e}", tmp.display())))?;
+                .map_err(|e| DnsError::Storage(format!("chmod {}: {e}", tmp.display())))?;
         }
 
         std::fs::rename(&tmp, &self.path).map_err(|e| {
-            DnsError::Other(format!(
+            DnsError::Storage(format!(
                 "rename {} -> {}: {e}",
                 tmp.display(),
                 self.path.display()
@@ -118,7 +119,8 @@ mod tests {
         fn load(&self) -> Result<Option<AccountCredentials>, DnsError> {
             match &*self.inner.lock().unwrap() {
                 Some(s) => Ok(Some(
-                    serde_json::from_str(s).map_err(|e| DnsError::Other(format!("parse: {e}")))?,
+                    serde_json::from_str(s)
+                        .map_err(|e| DnsError::Storage(format!("parse: {e}")))?,
                 )),
                 None => Ok(None),
             }
@@ -126,7 +128,7 @@ mod tests {
 
         fn save(&self, credentials: &AccountCredentials) -> Result<(), DnsError> {
             let s = serde_json::to_string(credentials)
-                .map_err(|e| DnsError::Other(format!("serialize: {e}")))?;
+                .map_err(|e| DnsError::Storage(format!("serialize: {e}")))?;
             *self.inner.lock().unwrap() = Some(s);
             Ok(())
         }

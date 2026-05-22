@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use std::env;
 use std::time::Duration;
 
@@ -195,6 +196,7 @@ impl GandiProvider {
     }
 }
 
+#[async_trait]
 impl DnsProvider for GandiProvider {
     async fn present(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
         validate_fqdn(fqdn)?;

@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use std::env;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -318,6 +319,7 @@ struct CreateRecordBody<'a> {
     ttl: u32,
 }
 
+#[async_trait]
 impl DnsProvider for CloudflareProvider {
     async fn present(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
         validate_fqdn(fqdn)?;
