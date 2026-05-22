@@ -10,7 +10,13 @@ readme = "README.md"
 keywords = ["acme", "letsencrypt", "dns", "tls", "certificate"]
 categories = ["cryptography", "network-programming"]
 
+[features]
+# Exposes in-memory test doubles (e.g. `MockDnsProvider`) so downstream
+# crates can integration-test their DNS-01 wiring without a live provider.
+testing = []
+
 [dependencies]
+async-trait = "0.1"
 thiserror = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 hickory-resolver = "0.24"

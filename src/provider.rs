@@ -1,5 +1,6 @@
-use std::future::Future;
 use std::time::Duration;
+
+use async_trait::async_trait;
 
 use crate::error::DnsError;
 
@@ -18,14 +19,35 @@ impl Default for PropagationTiming {
     }
 }
 
+/// A DNS provider that can place and remove the TXT records required by an
+/// ACME DNS-01 challenge.
+///
+/// This trait is object-safe (via [`async_trait`]), so it can be used as
+/// `Box<dyn DnsProvider>` when the concrete provider is chosen at runtime.
+#[async_trait]
 pub trait DnsProvider: Send + Sync {
-    fn present(&self, fqdn: &str, value: &str)
-        -> impl Future<Output = Result<(), DnsError>> + Send;
+    async fn present(&self, fqdn: &str, value: &str) -> Result<(), DnsError>;
 
-    fn cleanup(&self, fqdn: &str, value: &str)
-        -> impl Future<Output = Result<(), DnsError>> + Send;
+    async fn cleanup(&self, fqdn: &str, value: &str) -> Result<(), DnsError>;
 
     fn timing(&self) -> PropagationTiming {
         PropagationTiming::default()
+    }
+}
+
+/// Forwarding impl so `Box<dyn DnsProvider>` itself implements `DnsProvider`,
+/// letting it be passed to `Dns01Solver::new` like any concrete provider.
+#[async_trait]
+impl DnsProvider for Box<dyn DnsProvider> {
+    async fn present(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
+        (**self).present(fqdn, value).await
+    }
+
+    async fn cleanup(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
+        (**self).cleanup(fqdn, value).await
+    }
+
+    fn timing(&self) -> PropagationTiming {
+        (**self).timing()
     }
 }

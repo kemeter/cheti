@@ -148,16 +148,18 @@ let config = GandiConfig::new("token").with_zone("example.com").unwrap();
 
 ## Renewal
 
-`needs_renewal` parses the leaf certificate and returns `true` when expiry is within the threshold:
+`needs_renewal` parses the leaf certificate and returns `true` when expiry is within the threshold. An unparseable certificate also returns `true` — the safe default for a renewal gate is to re-issue:
 
 ```rust,no_run
 use cheti::needs_renewal;
 
 let cert_pem = std::fs::read_to_string("/etc/ssl/example.com.crt").unwrap();
-if needs_renewal(&cert_pem, 30).unwrap() {
+if needs_renewal(&cert_pem, 30) {
     // Re-issue: rebuild your solver and call solve_and_finalize again.
 }
 ```
+
+If you need to distinguish "expiring" from "couldn't parse", use `needs_renewal_checked`, which returns `Result<bool, DnsError>`.
 
 Hook this into a daily cron or a periodic task. For Let's Encrypt (90-day certs) a 30-day threshold is the conventional choice.
 
@@ -219,10 +221,12 @@ This is the only test that exercises the full `Dns01Solver` → `instant_acme::O
 ## Implementing a custom provider
 
 ```rust
+use async_trait::async_trait;
 use cheti::{DnsError, DnsProvider};
 
 struct MyProvider { /* ... */ }
 
+#[async_trait]
 impl DnsProvider for MyProvider {
     async fn present(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
         // Create or update a TXT record at `fqdn` containing `value`.
@@ -237,6 +241,8 @@ impl DnsProvider for MyProvider {
     }
 }
 ```
+
+The trait uses [`async_trait`](https://docs.rs/async-trait), so annotate your impl with `#[async_trait]`. Being object-safe, providers can also be used as `Box<dyn DnsProvider>` when the concrete type is chosen at runtime.
 
 `present` must be **idempotent** (re-calling with the same value is a no-op) and **concurrent-safe** per `fqdn`. The built-in providers use a `KeyedMutex` for the latter — feel free to copy the pattern.
 

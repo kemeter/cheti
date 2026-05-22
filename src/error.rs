@@ -41,6 +41,12 @@ pub enum DnsError {
     #[error("ACME challenge invalid for {0}")]
     ChallengeInvalid(String),
 
+    #[error("account store error: {0}")]
+    Storage(String),
+
+    #[error("certificate parse error: {0}")]
+    CertParse(String),
+
     #[error("other: {0}")]
     Other(String),
 }

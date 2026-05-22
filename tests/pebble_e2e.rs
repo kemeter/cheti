@@ -50,6 +50,7 @@ impl ChalltestsrvProvider {
     }
 }
 
+#[async_trait::async_trait]
 impl DnsProvider for ChalltestsrvProvider {
     async fn present(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
         let body = serde_json::json!({

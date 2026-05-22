@@ -374,6 +374,7 @@ mod tests {
         }
     }
 
+    #[async_trait::async_trait]
     impl DnsProvider for FakeProvider {
         async fn present(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
             self.calls
@@ -522,6 +523,7 @@ mod tests {
 
         // Solver takes ownership; wrap in a struct that derefs through Arc.
         struct ArcProvider(Arc<FakeProvider>);
+        #[async_trait::async_trait]
         impl DnsProvider for ArcProvider {
             async fn present(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
                 self.0.present(fqdn, value).await
@@ -565,6 +567,7 @@ mod tests {
         .fail_set_ready_at(1);
 
         struct ArcProvider(Arc<FakeProvider>);
+        #[async_trait::async_trait]
         impl DnsProvider for ArcProvider {
             async fn present(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
                 self.0.present(fqdn, value).await
@@ -599,6 +602,7 @@ mod tests {
         .fail_finalize(DnsError::Acme("CA exploded".into()));
 
         struct ArcProvider(Arc<FakeProvider>);
+        #[async_trait::async_trait]
         impl DnsProvider for ArcProvider {
             async fn present(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
                 self.0.present(fqdn, value).await
@@ -634,6 +638,7 @@ mod tests {
         ]);
 
         struct ArcProvider(Arc<FakeProvider>);
+        #[async_trait::async_trait]
         impl DnsProvider for ArcProvider {
             async fn present(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
                 self.0.present(fqdn, value).await
@@ -671,6 +676,7 @@ mod tests {
         ]);
 
         struct ArcProvider(Arc<FakeProvider>);
+        #[async_trait::async_trait]
         impl DnsProvider for ArcProvider {
             async fn present(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
                 self.0.present(fqdn, value).await

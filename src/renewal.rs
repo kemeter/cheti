@@ -8,26 +8,48 @@ use x509_parser::prelude::{FromDer, X509Certificate};
 use crate::error::DnsError;
 
 /// Returns `true` if the leaf certificate in `pem` expires within
-/// `threshold_days` days of `now`, or has already expired.
+/// `threshold_days` days of now, or has already expired — **or if the PEM
+/// cannot be parsed**. An unparseable certificate is treated as "renew it",
+/// because the safe failure mode for a renewal gate is to re-issue rather
+/// than serve a cert you can't reason about.
 ///
 /// Use this to gate a re-issuance: poll your cert store on a schedule and
 /// call `solve_and_finalize` again when this returns true. Common threshold
 /// for Let's Encrypt (90-day certs) is 30 days; for short-lived certs you
 /// want something tighter relative to the validity window.
-pub fn needs_renewal(pem: &str, threshold_days: u32) -> Result<bool, DnsError> {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| DnsError::Other(format!("system time before epoch: {e}")))?
-        .as_secs() as i64;
-    needs_renewal_at(pem, threshold_days, now)
+///
+/// If you need to distinguish "expiring" from "unparseable", use
+/// [`needs_renewal_checked`].
+pub fn needs_renewal(pem: &str, threshold_days: u32) -> bool {
+    needs_renewal_checked(pem, threshold_days).unwrap_or(true)
 }
 
-/// Same as `needs_renewal`, but with an explicit `now` (Unix seconds) for
-/// deterministic testing.
-pub fn needs_renewal_at(pem: &str, threshold_days: u32, now_unix: i64) -> Result<bool, DnsError> {
+/// Same as [`needs_renewal`] but surfaces parse errors instead of folding
+/// them into `true`.
+pub fn needs_renewal_checked(pem: &str, threshold_days: u32) -> Result<bool, DnsError> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| DnsError::CertParse(format!("system time before epoch: {e}")))?
+        .as_secs() as i64;
+    needs_renewal_at_checked(pem, threshold_days, now)
+}
+
+/// Lenient variant of [`needs_renewal_at_checked`]: unparseable PEM yields
+/// `true`. See [`needs_renewal`] for the rationale.
+pub fn needs_renewal_at(pem: &str, threshold_days: u32, now_unix: i64) -> bool {
+    needs_renewal_at_checked(pem, threshold_days, now_unix).unwrap_or(true)
+}
+
+/// Same as [`needs_renewal_checked`], but with an explicit `now` (Unix
+/// seconds) for deterministic testing.
+pub fn needs_renewal_at_checked(
+    pem: &str,
+    threshold_days: u32,
+    now_unix: i64,
+) -> Result<bool, DnsError> {
     let leaf_der = parse_leaf_der(pem)?;
     let (_, cert): (_, X509Certificate) = X509Certificate::from_der(&leaf_der)
-        .map_err(|e| DnsError::Other(format!("parse leaf certificate: {e}")))?;
+        .map_err(|e| DnsError::CertParse(format!("parse leaf certificate: {e}")))?;
 
     let not_after = cert.validity().not_after.timestamp();
     let threshold_seconds = i64::from(threshold_days) * 86_400;
@@ -39,14 +61,14 @@ fn parse_leaf_der(pem: &str) -> Result<Vec<u8>, DnsError> {
     match Pem::read(&mut cursor) {
         Ok((pem, _consumed)) => {
             if pem.label != "CERTIFICATE" {
-                return Err(DnsError::Other(format!(
+                return Err(DnsError::CertParse(format!(
                     "expected CERTIFICATE PEM, got {}",
                     pem.label
                 )));
             }
             Ok(pem.contents)
         }
-        Err(e) => Err(DnsError::Other(format!("no PEM block found: {e}"))),
+        Err(e) => Err(DnsError::CertParse(format!("no PEM block found: {e}"))),
     }
 }
 
@@ -75,7 +97,8 @@ mod tests {
         let not_after = 1_900_000_000;
         let pem = cert_pem_expiring_at(not_after);
         let now = not_after - 60 * 86_400; // 60 days before expiry
-        assert!(!needs_renewal_at(&pem, 30, now).unwrap());
+        assert!(!needs_renewal_at_checked(&pem, 30, now).unwrap());
+        assert!(!needs_renewal_at(&pem, 30, now));
     }
 
     #[test]
@@ -83,7 +106,8 @@ mod tests {
         let not_after = 1_900_000_000;
         let pem = cert_pem_expiring_at(not_after);
         let now = not_after - 10 * 86_400; // 10 days before expiry
-        assert!(needs_renewal_at(&pem, 30, now).unwrap());
+        assert!(needs_renewal_at_checked(&pem, 30, now).unwrap());
+        assert!(needs_renewal_at(&pem, 30, now));
     }
 
     #[test]
@@ -91,13 +115,21 @@ mod tests {
         let not_after = 1_900_000_000;
         let pem = cert_pem_expiring_at(not_after);
         let now = not_after + 86_400; // 1 day after expiry
-        assert!(needs_renewal_at(&pem, 30, now).unwrap());
+        assert!(needs_renewal_at_checked(&pem, 30, now).unwrap());
     }
 
     #[test]
-    fn rejects_non_pem_input() {
-        let err = needs_renewal_at("not a certificate", 30, 0).unwrap_err();
+    fn checked_variant_rejects_non_pem_input() {
+        let err = needs_renewal_at_checked("not a certificate", 30, 0).unwrap_err();
         assert!(err.to_string().to_lowercase().contains("pem"));
+    }
+
+    #[test]
+    fn lenient_variant_treats_unparseable_as_needs_renewal() {
+        // The whole point of the bool API: garbage in → "renew it" rather
+        // than a panic or a silent false.
+        assert!(needs_renewal_at("not a certificate", 30, 0));
+        assert!(needs_renewal("not a certificate", 30));
     }
 
     #[test]
@@ -108,6 +140,6 @@ mod tests {
         // (which would have different dates) shouldn't change the answer.
         let chain = format!("{leaf}{}", cert_pem_expiring_at(not_after - 365 * 86_400));
         let now = not_after - 60 * 86_400;
-        assert!(!needs_renewal_at(&chain, 30, now).unwrap());
+        assert!(!needs_renewal_at_checked(&chain, 30, now).unwrap());
     }
 }
