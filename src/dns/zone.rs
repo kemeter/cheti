@@ -1,14 +1,17 @@
 use std::sync::OnceLock;
 
-use hickory_resolver::config::{ResolverConfig, ResolverOpts};
-use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::proto::rr::RecordType;
+use hickory_resolver::TokioResolver;
 
 use crate::error::DnsError;
 
-fn shared_resolver() -> &'static TokioAsyncResolver {
-    static RESOLVER: OnceLock<TokioAsyncResolver> = OnceLock::new();
+fn shared_resolver() -> &'static TokioResolver {
+    static RESOLVER: OnceLock<TokioResolver> = OnceLock::new();
     RESOLVER.get_or_init(|| {
-        TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default())
+        TokioResolver::builder_tokio()
+            .expect("failed to read system DNS configuration")
+            .build()
+            .expect("failed to build system DNS resolver")
     })
 }
 
@@ -30,8 +33,8 @@ pub async fn find_zone(fqdn: &str) -> Result<String, DnsError> {
             return Err(DnsError::ZoneNotFound(fqdn.to_string()));
         }
 
-        if let Ok(response) = resolver.soa_lookup(&candidate).await {
-            if response.iter().next().is_some() {
+        if let Ok(response) = resolver.lookup(&candidate, RecordType::SOA).await {
+            if response.answers().iter().next().is_some() {
                 return Ok(candidate);
             }
         }
