@@ -22,6 +22,8 @@ pub use providers::gandi::{GandiConfig, GandiProvider};
 pub use providers::ovh::{OvhConfig, OvhProvider};
 pub use providers::scaleway::{ScalewayConfig, ScalewayProvider};
 pub use renewal::{
-    needs_renewal, needs_renewal_at, needs_renewal_at_checked, needs_renewal_checked,
+    cert_lifetime, cert_lifetime_at, needs_renewal, needs_renewal_at, needs_renewal_at_checked,
+    needs_renewal_checked, needs_renewal_ratio, needs_renewal_ratio_at,
+    needs_renewal_ratio_at_checked, needs_renewal_ratio_checked, CertLifetime,
 };
 pub use solver::Dns01Solver;
