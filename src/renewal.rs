@@ -2,6 +2,7 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use x509_parser::extensions::GeneralName;
 use x509_parser::pem::Pem;
 use x509_parser::prelude::{FromDer, X509Certificate};
 
@@ -52,13 +53,18 @@ pub fn needs_renewal_at_checked(
     Ok(not_after - now_unix <= threshold_seconds)
 }
 
-/// The validity window of a leaf certificate, in Unix seconds, plus the
-/// derived day counts callers most often want.
+/// Identity and validity metadata of a leaf certificate.
 ///
-/// `total_days` is the full lifetime (`not_after - not_before`); `remaining_days`
-/// is measured from a given `now` and may be negative for an expired cert. Both
-/// are truncated toward zero — a cert with 29.9 days left reports `29`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Timestamps are Unix seconds. `total_days` is the full lifetime
+/// (`not_after - not_before`); `remaining_days` is measured from a given `now`
+/// and may be negative for an expired cert. Both are truncated toward zero — a
+/// cert with 29.9 days left reports `29`.
+///
+/// `subject_cn` and `sans` describe what the certificate is for: the subject
+/// Common Name (if present) and the DNS names from the Subject Alternative Name
+/// extension. `sans` carries only `dNSName` entries; other GeneralName kinds
+/// (IP, email, URI) are ignored, since callers listing TLS certs want hostnames.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CertLifetime {
     /// `notBefore` as Unix seconds.
     pub not_before: i64,
@@ -69,12 +75,17 @@ pub struct CertLifetime {
     pub total_days: i64,
     /// Whole days from `now` until `not_after`. Negative once expired.
     pub remaining_days: i64,
+    /// Subject Common Name, if the subject carries one.
+    pub subject_cn: Option<String>,
+    /// DNS names from the Subject Alternative Name extension, in certificate
+    /// order. Empty if the cert has no SAN extension or no `dNSName` entries.
+    pub sans: Vec<String>,
 }
 
-/// Parse the leaf certificate in `pem` and report its validity window relative
-/// to `now_unix`. Mirrors [`needs_renewal_at_checked`]'s parsing (leaf only,
-/// unparseable PEM is an error). Use this to surface expiry metadata — e.g. an
-/// API that lists certificates with their remaining lifetime.
+/// Parse the leaf certificate in `pem` and report its identity and validity
+/// relative to `now_unix`. Mirrors [`needs_renewal_at_checked`]'s parsing (leaf
+/// only, unparseable PEM is an error). Use this to surface certificate metadata
+/// — e.g. an API that lists certificates with their names and remaining lifetime.
 pub fn cert_lifetime_at(pem: &str, now_unix: i64) -> Result<CertLifetime, DnsError> {
     let leaf_der = parse_leaf_der(pem)?;
     let (_, cert): (_, X509Certificate) = X509Certificate::from_der(&leaf_der)
@@ -82,11 +93,34 @@ pub fn cert_lifetime_at(pem: &str, now_unix: i64) -> Result<CertLifetime, DnsErr
 
     let not_before = cert.validity().not_before.timestamp();
     let not_after = cert.validity().not_after.timestamp();
+
+    let subject_cn = cert
+        .subject()
+        .iter_common_name()
+        .next()
+        .and_then(|cn| cn.as_str().ok())
+        .map(str::to_owned);
+
+    let sans = match cert.subject_alternative_name() {
+        Ok(Some(ext)) => ext
+            .value
+            .general_names
+            .iter()
+            .filter_map(|gn| match gn {
+                GeneralName::DNSName(name) => Some((*name).to_owned()),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+
     Ok(CertLifetime {
         not_before,
         not_after,
         total_days: (not_after - not_before).max(0) / 86_400,
         remaining_days: (not_after - now_unix) / 86_400,
+        subject_cn,
+        sans,
     })
 }
 
@@ -207,6 +241,26 @@ mod tests {
         cert.pem()
     }
 
+    /// Self-signed cert with an explicit subject Common Name and a set of SAN
+    /// DNS names, for exercising the identity fields of [`CertLifetime`].
+    fn cert_pem_with_identity(cn: &str, sans: &[&str]) -> String {
+        use rcgen::{DnType, SanType};
+
+        let mut params =
+            CertificateParams::new(sans.iter().map(|s| s.to_string()).collect::<Vec<_>>()).unwrap();
+        params.distinguished_name.push(DnType::CommonName, cn);
+        // `new()` populates SANs from the names above; set them explicitly so the
+        // ordering and content are unambiguous for the assertion.
+        params.subject_alt_names = sans
+            .iter()
+            .map(|s| SanType::DnsName(s.to_string().try_into().unwrap()))
+            .collect();
+
+        let key = KeyPair::generate().unwrap();
+        let cert = params.self_signed(&key).unwrap();
+        cert.pem()
+    }
+
     #[test]
     fn returns_false_when_far_from_expiry() {
         let not_after = 1_900_000_000;
@@ -271,6 +325,27 @@ mod tests {
         assert_eq!(life.not_before, not_after - 90 * DAY);
         assert_eq!(life.total_days, 90);
         assert_eq!(life.remaining_days, 10);
+    }
+
+    #[test]
+    fn cert_lifetime_reports_subject_cn_and_sans() {
+        let pem =
+            cert_pem_with_identity("shop.example.com", &["shop.example.com", "www.example.com"]);
+        let life = cert_lifetime(&pem).unwrap();
+
+        assert_eq!(life.subject_cn.as_deref(), Some("shop.example.com"));
+        assert_eq!(life.sans, vec!["shop.example.com", "www.example.com"]);
+    }
+
+    #[test]
+    fn cert_lifetime_sans_empty_when_no_san_extension() {
+        // A cert with only a subject CN and no SAN names: `sans` is empty,
+        // `subject_cn` is still populated.
+        let pem = cert_pem_with_identity("legacy.example.com", &[]);
+        let life = cert_lifetime(&pem).unwrap();
+
+        assert_eq!(life.subject_cn.as_deref(), Some("legacy.example.com"));
+        assert!(life.sans.is_empty());
     }
 
     #[test]
