@@ -1,4 +1,5 @@
-//! Cheti — ACME DNS-01 challenge library with pluggable DNS providers.
+//! Cheti — ACME challenge library with pluggable DNS-01 providers and
+//! TLS-ALPN-01 support.
 //!
 //! See [the README](https://github.com/kemeter/cheti) for usage examples.
 #![doc = include_str!("../README.md")]
@@ -12,6 +13,7 @@ pub mod renewal;
 pub mod solver;
 #[cfg(feature = "testing")]
 pub mod testing;
+pub mod tls_alpn;
 
 pub use account_store::{AccountStore, FileAccountStore};
 pub use dns::{find_zone, wait_for_propagation, DEFAULT_RESOLVERS};
@@ -27,3 +29,7 @@ pub use renewal::{
     needs_renewal_ratio_at_checked, needs_renewal_ratio_checked, CertLifetime,
 };
 pub use solver::Dns01Solver;
+pub use tls_alpn::{
+    build_challenge_certificate, ChallengeCertificate, ChallengeResponder, TlsAlpn01Solver,
+    ACME_TLS_ALPN_NAME,
+};
