@@ -255,7 +255,9 @@ fn txt_rrset(fqdn: &Name, value: &str, ttl: u32) -> RecordSet {
 
 /// Checks a raw response against the signed request it answers. Errors are
 /// read before the signature, since servers answer BADKEY and BADSIG with
-/// unsigned responses (RFC 8945 §5.3.2).
+/// unsigned responses (RFC 8945 §5.3.2). Any other error is expected to be
+/// signed and verifiable: one that is not is still reported, but flagged as
+/// unauthenticated, as nothing proves the server sent it.
 fn check_response(
     request_id: u16,
     bytes: &[u8],
@@ -279,7 +281,22 @@ fn check_response(
     let rcode = response.response_code;
     if rcode != ResponseCode::NoError {
         let tsig_error = response.signature.as_ref().and_then(|sig| sig.data.error);
-        return Err(rcode_error(rcode, tsig_error, nameserver));
+        // NOTAUTH with BADKEY or BADSIG comes unsigned, and BADTIME carries the
+        // server's clock, which fails the time check (RFC 8945 §5.3.2): those
+        // cannot be verified by design. Any other error must be.
+        let unverifiable_by_design = rcode == ResponseCode::NotAuth
+            && matches!(
+                tsig_error,
+                Some(TsigError::BadKey | TsigError::BadSig | TsigError::BadTime)
+            );
+        let unverified = if unverifiable_by_design || verifier.verify(bytes).is_ok() {
+            None
+        } else if response.signature.is_none() {
+            Some("unsigned response")
+        } else {
+            Some("TSIG verification failed")
+        };
+        return Err(rcode_error(rcode, tsig_error, unverified, nameserver));
     }
 
     verifier.verify(bytes).map_err(|e| {
@@ -293,6 +310,7 @@ fn check_response(
 fn rcode_error(
     rcode: ResponseCode,
     tsig_error: Option<TsigError>,
+    unverified: Option<&str>,
     nameserver: &Nameserver,
 ) -> DnsError {
     let detail = match tsig_error {
@@ -302,7 +320,12 @@ fn rcode_error(
         Some(_) => " (TSIG error)",
         None => "",
     };
-    let message = format!("{PROVIDER} update rejected by {nameserver}: {rcode}{detail}");
+    let unverified = match unverified {
+        Some(reason) => format!(" ({reason}, not authenticated)"),
+        None => String::new(),
+    };
+    let message =
+        format!("{PROVIDER} update rejected by {nameserver}: {rcode}{detail}{unverified}");
     match rcode {
         ResponseCode::NotAuth | ResponseCode::Refused => DnsError::Auth(message),
         _ => DnsError::Api(message),
@@ -695,12 +718,17 @@ mod tests {
     #[test]
     fn rcode_error_maps_auth_failures() {
         let server = ns("192.0.2.1", 53);
-        let err = rcode_error(ResponseCode::NotAuth, Some(TsigError::BadKey), &server);
+        let err = rcode_error(
+            ResponseCode::NotAuth,
+            Some(TsigError::BadKey),
+            None,
+            &server,
+        );
         assert!(matches!(err, DnsError::Auth(_)), "got {err:?}");
         assert!(err.to_string().contains("unknown key"), "got {err}");
-        let err = rcode_error(ResponseCode::Refused, None, &server);
+        let err = rcode_error(ResponseCode::Refused, None, None, &server);
         assert!(matches!(err, DnsError::Auth(_)), "got {err:?}");
-        let err = rcode_error(ResponseCode::ServFail, None, &server);
+        let err = rcode_error(ResponseCode::ServFail, None, None, &server);
         assert!(matches!(err, DnsError::Api(_)), "got {err:?}");
     }
 }

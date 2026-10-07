@@ -146,4 +146,6 @@ async fn update_outside_policy_is_refused() {
         .unwrap_err();
 
     assert!(matches!(err, DnsError::Auth(_)), "got {err:?}");
+    // BIND signs this error, so it must not be flagged as unauthenticated.
+    assert!(!err.to_string().contains("not authenticated"), "got {err}");
 }
