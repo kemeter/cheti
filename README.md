@@ -7,7 +7,7 @@ ACME DNS-01 challenge library for Rust, with pluggable DNS providers.
 ## Features
 
 - **DNS-01 challenges only** — works for wildcards and for domains behind a firewall, no HTTP-01 server needed
-- **Built-in providers**: Cloudflare, Gandi, OVH, Scaleway
+- **Built-in providers**: Cloudflare, deSEC, Gandi, OVH, Scaleway
 - **Bring-your-own provider**: implement the `DnsProvider` trait for anything else
 - **Persisted ACME accounts** via `AccountStore` so you don't burn through your CA's account-creation rate limit
 - **Renewal helper** that reads a leaf certificate's expiry and tells you when to re-issue
@@ -98,6 +98,17 @@ If you already know the Cloudflare zone id (saves one API call):
 use cheti::CloudflareConfig;
 let config = CloudflareConfig::new("token")
     .with_zone_id("example.com", "abc123zoneid").unwrap();
+```
+
+### deSEC
+
+API token from <https://desec.io/tokens>. The zone is resolved through the deSEC API (`owns_qname`), so no SOA lookup is needed. Records are written with a TTL of 3600s (or the domain's minimum TTL if higher), as deSEC rejects lower values for most accounts. deSEC rate-limits RRset writes per domain; a throttled request fails with an error carrying the `Retry-After` delay.
+
+```rust,no_run
+use cheti::{DesecConfig, DesecProvider};
+
+let config = DesecConfig::new(std::env::var("DESEC_TOKEN").unwrap());
+let provider = DesecProvider::new(config).unwrap();
 ```
 
 ### Gandi
