@@ -7,7 +7,7 @@ ACME DNS-01 challenge library for Rust, with pluggable DNS providers.
 ## Features
 
 - **DNS-01 challenges only** — works for wildcards and for domains behind a firewall, no HTTP-01 server needed
-- **Built-in providers**: Cloudflare, deSEC, Gandi, OVH, Scaleway, and RFC 2136 (TSIG-signed dynamic updates) for self-hosted servers such as BIND, Knot DNS or PowerDNS
+- **Built-in providers**: Cloudflare, deSEC, DigitalOcean, Gandi, Hetzner, Infomaniak, OVH, Porkbun, Scaleway, and RFC 2136 (TSIG-signed dynamic updates) for self-hosted servers such as BIND, Knot DNS or PowerDNS
 - **Bring-your-own provider**: implement the `DnsProvider` trait for anything else
 - **Persisted ACME accounts** via `AccountStore` so you don't burn through your CA's account-creation rate limit
 - **Renewal helper** that reads a leaf certificate's expiry and tells you when to re-issue
@@ -81,6 +81,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 Each provider has the same shape: a `*Config` builder, then a `*Provider` constructed from it.
 
+DigitalOcean, Hetzner, Infomaniak and Porkbun are tested against mocks of their documented APIs but have not yet been exercised against the live services. Reports from real accounts are welcome.
+
 ### Cloudflare
 
 Bearer token with `Zone:DNS:Edit` scope. Create it at <https://dash.cloudflare.com/profile/api-tokens>.
@@ -111,6 +113,19 @@ let config = DesecConfig::new(std::env::var("DESEC_TOKEN").unwrap());
 let provider = DesecProvider::new(config).unwrap();
 ```
 
+### DigitalOcean
+
+Personal access token from <https://cloud.digitalocean.com/account/api/tokens>, with read and write access to domains. Each challenge value is stored as its own TXT record (TTL 30s, the minimum DigitalOcean accepts), so a wildcard and an apex challenge on the same name don't interfere, and cleanup only deletes the record holding its own value. The zone must be a domain managed in the DigitalOcean account.
+
+```rust,no_run
+use cheti::{DigitalOceanConfig, DigitalOceanProvider};
+
+let config = DigitalOceanConfig::new(std::env::var("DIGITALOCEAN_TOKEN").unwrap());
+let provider = DigitalOceanProvider::new(config).unwrap();
+```
+
+`DigitalOceanProvider::from_env()` reads the token from `DIGITALOCEAN_TOKEN`.
+
 ### Gandi
 
 Personal access token from <https://account.gandi.net/en/users/_/security>. Needs DNS scope on the relevant domains.
@@ -120,6 +135,28 @@ use cheti::{GandiConfig, GandiProvider};
 
 let config = GandiConfig::new(std::env::var("GANDIV5_PERSONAL_ACCESS_TOKEN").unwrap());
 let provider = GandiProvider::new(config).unwrap();
+```
+
+### Hetzner
+
+API token of the Hetzner Console project that holds the zone, with read & write permission. Create it in the [Hetzner Console](https://console.hetzner.com/) under `Security` → `API Tokens`. Records are managed through the zones API of the Hetzner Cloud API; the legacy DNS Console API (`dns.hetzner.com`) is not supported, as it has been shut down. The zone is resolved through the API, so no SOA lookup is needed. A new TXT RRSet is created with a TTL of 60s; an existing one keeps its TTL. Record changes are asynchronous actions, which the provider waits for (up to 60s) before returning.
+
+```rust,no_run
+use cheti::{HetznerConfig, HetznerProvider};
+
+let config = HetznerConfig::new(std::env::var("HETZNER_API_TOKEN").unwrap());
+let provider = HetznerProvider::new(config).unwrap();
+```
+
+### Infomaniak
+
+API token created in the Infomaniak Manager (profile, API tokens) with the `dns:read` and `dns:write` scopes. Uses the v2 zone API (`/2/zones/{zone}/records`). The zone is resolved through the API by trying each suffix of the FQDN (longest first) against `/2/zones/{zone}`, so delegated sub-zones are supported and no SOA lookup is needed. Each TXT value is its own record, written with a TTL of 300s.
+
+```rust,no_run
+use cheti::{InfomaniakConfig, InfomaniakProvider};
+
+let config = InfomaniakConfig::new(std::env::var("INFOMANIAK_ACCESS_TOKEN").unwrap());
+let provider = InfomaniakProvider::new(config).unwrap();
 ```
 
 ### OVH
@@ -136,6 +173,22 @@ let config = OvhConfig::new(
 );
 let provider = OvhProvider::new(config).unwrap();
 ```
+
+### Porkbun
+
+API key and secret API key from <https://porkbun.com/account/api>. API access must also be turned on for each domain (domain management page, "API Access"); otherwise every call fails with an authentication error naming the domain. Porkbun has no endpoint telling which domain owns a name, so the zone is found with the SOA lookup unless given through `with_zone`. Each challenge value is its own TXT record, written with a TTL of 600s (the Porkbun minimum), so a wildcard and its apex can be validated at the same time. Porkbun accepts writes even for a domain delegated to other nameservers; `present` fails (and removes the record) when Porkbun reports that the record will not resolve.
+
+```rust,no_run
+use cheti::{PorkbunConfig, PorkbunProvider};
+
+let config = PorkbunConfig::new(
+    std::env::var("PORKBUN_API_KEY").unwrap(),
+    std::env::var("PORKBUN_SECRET_API_KEY").unwrap(),
+);
+let provider = PorkbunProvider::new(config).unwrap();
+```
+
+`PorkbunProvider::from_env()` reads the same two variables.
 
 ### RFC 2136 (BIND, Knot DNS, PowerDNS, ...)
 
