@@ -23,6 +23,7 @@ pub use providers::cloudflare::{CloudflareConfig, CloudflareProvider};
 pub use providers::desec::{DesecConfig, DesecProvider};
 pub use providers::gandi::{GandiConfig, GandiProvider};
 pub use providers::ovh::{OvhConfig, OvhProvider};
+pub use providers::rfc2136::{Rfc2136Config, Rfc2136Provider, TsigAlgorithm};
 pub use providers::scaleway::{ScalewayConfig, ScalewayProvider};
 pub use renewal::{
     cert_lifetime, cert_lifetime_at, needs_renewal, needs_renewal_at, needs_renewal_at_checked,

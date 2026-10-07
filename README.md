@@ -7,7 +7,7 @@ ACME DNS-01 challenge library for Rust, with pluggable DNS providers.
 ## Features
 
 - **DNS-01 challenges only** — works for wildcards and for domains behind a firewall, no HTTP-01 server needed
-- **Built-in providers**: Cloudflare, deSEC, Gandi, OVH, Scaleway
+- **Built-in providers**: Cloudflare, deSEC, Gandi, OVH, Scaleway, and RFC 2136 (TSIG-signed dynamic updates) for self-hosted servers such as BIND, Knot DNS or PowerDNS
 - **Bring-your-own provider**: implement the `DnsProvider` trait for anything else
 - **Persisted ACME accounts** via `AccountStore` so you don't burn through your CA's account-creation rate limit
 - **Renewal helper** that reads a leaf certificate's expiry and tells you when to re-issue
@@ -137,6 +137,41 @@ let config = OvhConfig::new(
 let provider = OvhProvider::new(config).unwrap();
 ```
 
+### RFC 2136 (BIND, Knot DNS, PowerDNS, ...)
+
+Sends TSIG-signed dynamic updates (RFC 2136) over TCP to the zone's primary server. Supported TSIG algorithms are `hmac-sha256` (default), `hmac-sha384` and `hmac-sha512`; `hmac-sha1` and `hmac-md5` are not. Each `present` adds a single TXT record and each `cleanup` deletes only that record, so other values on the same name (e.g. wildcard + apex issuance) are left alone.
+
+```rust,no_run
+use cheti::{Rfc2136Config, Rfc2136Provider, TsigAlgorithm};
+
+let config = Rfc2136Config::new(
+    "ns1.example.com:53",        // host, ip, host:port or [ipv6]:port; port defaults to 53
+    "acme-update",               // TSIG key name, as declared on the server
+    std::env::var("RFC2136_TSIG_SECRET").unwrap(), // base64 secret
+)
+.with_algorithm(TsigAlgorithm::HmacSha512);
+let provider = Rfc2136Provider::new(config).unwrap();
+```
+
+`Rfc2136Provider::from_env()` reads `RFC2136_NAMESERVER`, `RFC2136_TSIG_KEY`, `RFC2136_TSIG_SECRET` and the optional `RFC2136_TSIG_ALGORITHM`. Records are written with a 60s TTL (`with_ttl` to change it), and each update exchange times out after 10s (`with_timeout`). The zone is found with an SOA lookup through the system resolvers; for internal or split-horizon zones, set it with `with_zone`.
+
+The key needs permission to update TXT records under the zone. With BIND:
+
+```text
+key "acme-update" {
+    algorithm hmac-sha256;
+    secret "<base64 secret, e.g. from `tsig-keygen acme-update`>";
+};
+
+zone "example.com" {
+    type primary;
+    file "/var/lib/bind/example.com.zone";
+    update-policy {
+        grant acme-update zonesub TXT;
+    };
+};
+```
+
 ### Scaleway
 
 API secret key from <https://console.scaleway.com/iam/api-keys>. The key needs the `DNSFullAccess` permission set.
@@ -228,6 +263,14 @@ cargo test --test pebble_e2e -- --ignored
 ```
 
 This is the only test that exercises the full `Dns01Solver` → `instant_acme::Order` flow; the rest of the suite uses wiremock against each provider's HTTP API.
+
+The RFC 2136 provider is tested against an in-process mock server, and optionally against a real BIND primary:
+
+```sh
+./scripts/bind-up.sh
+cargo test --test rfc2136_bind -- --ignored
+./scripts/bind-down.sh
+```
 
 ## Implementing a custom provider
 
