@@ -7,7 +7,7 @@ ACME DNS-01 challenge library for Rust, with pluggable DNS providers.
 ## Features
 
 - **DNS-01 challenges only** — works for wildcards and for domains behind a firewall, no HTTP-01 server needed
-- **Built-in providers**: Cloudflare, deSEC, DigitalOcean, Gandi, Hetzner, OVH, Scaleway, and RFC 2136 (TSIG-signed dynamic updates) for self-hosted servers such as BIND, Knot DNS or PowerDNS
+- **Built-in providers**: Cloudflare, deSEC, DigitalOcean, Gandi, Hetzner, OVH, Porkbun, Scaleway, and RFC 2136 (TSIG-signed dynamic updates) for self-hosted servers such as BIND, Knot DNS or PowerDNS
 - **Bring-your-own provider**: implement the `DnsProvider` trait for anything else
 - **Persisted ACME accounts** via `AccountStore` so you don't burn through your CA's account-creation rate limit
 - **Renewal helper** that reads a leaf certificate's expiry and tells you when to re-issue
@@ -160,6 +160,22 @@ let config = OvhConfig::new(
 );
 let provider = OvhProvider::new(config).unwrap();
 ```
+
+### Porkbun
+
+API key and secret API key from <https://porkbun.com/account/api>. API access must also be turned on for each domain (domain management page, "API Access"); otherwise every call fails with an authentication error naming the domain. Porkbun has no endpoint telling which domain owns a name, so the zone is found with the SOA lookup unless given through `with_zone`. Each challenge value is its own TXT record, written with a TTL of 600s (the Porkbun minimum), so a wildcard and its apex can be validated at the same time. Porkbun accepts writes even for a domain delegated to other nameservers; `present` fails (and removes the record) when Porkbun reports that the record will not resolve.
+
+```rust,no_run
+use cheti::{PorkbunConfig, PorkbunProvider};
+
+let config = PorkbunConfig::new(
+    std::env::var("PORKBUN_API_KEY").unwrap(),
+    std::env::var("PORKBUN_SECRET_API_KEY").unwrap(),
+);
+let provider = PorkbunProvider::new(config).unwrap();
+```
+
+`PorkbunProvider::from_env()` reads the same two variables.
 
 ### RFC 2136 (BIND, Knot DNS, PowerDNS, ...)
 

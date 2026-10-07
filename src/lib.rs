@@ -25,6 +25,7 @@ pub use providers::digitalocean::{DigitalOceanConfig, DigitalOceanProvider};
 pub use providers::gandi::{GandiConfig, GandiProvider};
 pub use providers::hetzner::{HetznerConfig, HetznerProvider};
 pub use providers::ovh::{OvhConfig, OvhProvider};
+pub use providers::porkbun::{PorkbunConfig, PorkbunProvider};
 pub use providers::rfc2136::{Rfc2136Config, Rfc2136Provider, TsigAlgorithm};
 pub use providers::scaleway::{ScalewayConfig, ScalewayProvider};
 pub use renewal::{
