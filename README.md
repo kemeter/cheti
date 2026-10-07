@@ -81,6 +81,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 Each provider has the same shape: a `*Config` builder, then a `*Provider` constructed from it.
 
+DigitalOcean, Hetzner, Infomaniak and Porkbun are tested against mocks of their documented APIs but have not yet been exercised against the live services. Reports from real accounts are welcome.
+
 ### Cloudflare
 
 Bearer token with `Zone:DNS:Edit` scope. Create it at <https://dash.cloudflare.com/profile/api-tokens>.
