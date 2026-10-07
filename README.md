@@ -7,7 +7,7 @@ ACME DNS-01 challenge library for Rust, with pluggable DNS providers.
 ## Features
 
 - **DNS-01 challenges only** — works for wildcards and for domains behind a firewall, no HTTP-01 server needed
-- **Built-in providers**: Cloudflare, deSEC, Gandi, OVH, Scaleway, and RFC 2136 (TSIG-signed dynamic updates) for self-hosted servers such as BIND, Knot DNS or PowerDNS
+- **Built-in providers**: Cloudflare, deSEC, DigitalOcean, Gandi, OVH, Scaleway, and RFC 2136 (TSIG-signed dynamic updates) for self-hosted servers such as BIND, Knot DNS or PowerDNS
 - **Bring-your-own provider**: implement the `DnsProvider` trait for anything else
 - **Persisted ACME accounts** via `AccountStore` so you don't burn through your CA's account-creation rate limit
 - **Renewal helper** that reads a leaf certificate's expiry and tells you when to re-issue
@@ -110,6 +110,19 @@ use cheti::{DesecConfig, DesecProvider};
 let config = DesecConfig::new(std::env::var("DESEC_TOKEN").unwrap());
 let provider = DesecProvider::new(config).unwrap();
 ```
+
+### DigitalOcean
+
+Personal access token from <https://cloud.digitalocean.com/account/api/tokens>, with read and write access to domains. Each challenge value is stored as its own TXT record (TTL 30s, the minimum DigitalOcean accepts), so a wildcard and an apex challenge on the same name don't interfere, and cleanup only deletes the record holding its own value. The zone must be a domain managed in the DigitalOcean account.
+
+```rust,no_run
+use cheti::{DigitalOceanConfig, DigitalOceanProvider};
+
+let config = DigitalOceanConfig::new(std::env::var("DIGITALOCEAN_TOKEN").unwrap());
+let provider = DigitalOceanProvider::new(config).unwrap();
+```
+
+`DigitalOceanProvider::from_env()` reads the token from `DIGITALOCEAN_TOKEN`.
 
 ### Gandi
 
