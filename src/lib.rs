@@ -24,6 +24,7 @@ pub use providers::desec::{DesecConfig, DesecProvider};
 pub use providers::digitalocean::{DigitalOceanConfig, DigitalOceanProvider};
 pub use providers::gandi::{GandiConfig, GandiProvider};
 pub use providers::hetzner::{HetznerConfig, HetznerProvider};
+pub use providers::infomaniak::{InfomaniakConfig, InfomaniakProvider};
 pub use providers::ovh::{OvhConfig, OvhProvider};
 pub use providers::porkbun::{PorkbunConfig, PorkbunProvider};
 pub use providers::rfc2136::{Rfc2136Config, Rfc2136Provider, TsigAlgorithm};
