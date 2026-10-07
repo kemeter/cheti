@@ -7,7 +7,7 @@ ACME DNS-01 challenge library for Rust, with pluggable DNS providers.
 ## Features
 
 - **DNS-01 challenges only** — works for wildcards and for domains behind a firewall, no HTTP-01 server needed
-- **Built-in providers**: Cloudflare, deSEC, DigitalOcean, Gandi, OVH, Scaleway, and RFC 2136 (TSIG-signed dynamic updates) for self-hosted servers such as BIND, Knot DNS or PowerDNS
+- **Built-in providers**: Cloudflare, deSEC, DigitalOcean, Gandi, Hetzner, OVH, Scaleway, and RFC 2136 (TSIG-signed dynamic updates) for self-hosted servers such as BIND, Knot DNS or PowerDNS
 - **Bring-your-own provider**: implement the `DnsProvider` trait for anything else
 - **Persisted ACME accounts** via `AccountStore` so you don't burn through your CA's account-creation rate limit
 - **Renewal helper** that reads a leaf certificate's expiry and tells you when to re-issue
@@ -133,6 +133,17 @@ use cheti::{GandiConfig, GandiProvider};
 
 let config = GandiConfig::new(std::env::var("GANDIV5_PERSONAL_ACCESS_TOKEN").unwrap());
 let provider = GandiProvider::new(config).unwrap();
+```
+
+### Hetzner
+
+API token of the Hetzner Console project that holds the zone, with read & write permission. Create it in the [Hetzner Console](https://console.hetzner.com/) under `Security` → `API Tokens`. Records are managed through the zones API of the Hetzner Cloud API; the legacy DNS Console API (`dns.hetzner.com`) is not supported, as it has been shut down. The zone is resolved through the API, so no SOA lookup is needed. A new TXT RRSet is created with a TTL of 60s; an existing one keeps its TTL. Record changes are asynchronous actions, which the provider waits for (up to 60s) before returning.
+
+```rust,no_run
+use cheti::{HetznerConfig, HetznerProvider};
+
+let config = HetznerConfig::new(std::env::var("HETZNER_API_TOKEN").unwrap());
+let provider = HetznerProvider::new(config).unwrap();
 ```
 
 ### OVH
