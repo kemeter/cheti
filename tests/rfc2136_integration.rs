@@ -29,6 +29,11 @@ enum Behavior {
     Normal,
     /// Answer every update with this RCODE (signed).
     Rcode(ResponseCode),
+    /// Answer every update with this RCODE, without signing the response.
+    UnsignedRcode(ResponseCode),
+    /// Answer every update with this RCODE, signed with a key the client does
+    /// not share.
+    ForgedRcode(ResponseCode),
     /// Sign the response with a key the client does not share.
     ForgedResponse,
     /// Accept the connection but never answer.
@@ -146,7 +151,9 @@ async fn serve(mut stream: TcpStream, behavior: Behavior, state: Arc<Mutex<State
         }
         Ok((request_mac, _, _)) => {
             let rcode = match behavior {
-                Behavior::Rcode(rcode) => rcode,
+                Behavior::Rcode(rcode)
+                | Behavior::UnsignedRcode(rcode)
+                | Behavior::ForgedRcode(rcode) => rcode,
                 _ => ResponseCode::NoError,
             };
             {
@@ -157,11 +164,14 @@ async fn serve(mut stream: TcpStream, behavior: Behavior, state: Arc<Mutex<State
                 state.updates.push(message.clone());
             }
             let response_signer = match behavior {
-                Behavior::ForgedResponse => server_signer(WRONG_SECRET),
+                Behavior::ForgedResponse | Behavior::ForgedRcode(_) => server_signer(WRONG_SECRET),
                 _ => signer,
             };
             let mut response = Message::error_msg(message.id, OpCode::Update, rcode);
             let unsigned = response.to_vec().unwrap();
+            if let Behavior::UnsignedRcode(_) = behavior {
+                return write_framed(&mut stream, &unsigned).await;
+            }
             let tsig =
                 TSigResponseContext::new(message.id, now(), response_signer, request_mac, None)
                     .sign(&unsigned)
@@ -171,8 +181,12 @@ async fn serve(mut stream: TcpStream, behavior: Behavior, state: Arc<Mutex<State
         }
     };
 
-    let mut framed = (response_bytes.len() as u16).to_be_bytes().to_vec();
-    framed.extend_from_slice(&response_bytes);
+    write_framed(&mut stream, &response_bytes).await;
+}
+
+async fn write_framed(stream: &mut TcpStream, bytes: &[u8]) {
+    let mut framed = (bytes.len() as u16).to_be_bytes().to_vec();
+    framed.extend_from_slice(bytes);
     stream.write_all(&framed).await.unwrap();
 }
 
@@ -281,6 +295,7 @@ async fn wrong_secret_is_reported_as_auth_error() {
 
     assert!(matches!(err, DnsError::Auth(_)), "got {err:?}");
     assert!(err.to_string().contains("bad signature"), "got {err}");
+    assert!(!err.to_string().contains("not authenticated"), "got {err}");
     assert!(server.values(FQDN).is_empty());
 }
 
@@ -295,6 +310,46 @@ async fn refused_update_is_reported_as_auth_error() {
         .unwrap_err();
 
     assert!(matches!(err, DnsError::Auth(_)), "got {err:?}");
+    assert!(!err.to_string().contains("not authenticated"), "got {err}");
+}
+
+#[tokio::test]
+async fn unsigned_error_is_reported_as_unauthenticated() {
+    let server = MockServer::start(Behavior::UnsignedRcode(ResponseCode::Refused)).await;
+
+    let err = server
+        .provider(SECRET)
+        .present(FQDN, VALUE)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, DnsError::Auth(_)), "got {err:?}");
+    let message = err.to_string();
+    assert!(
+        message.contains("REFUSED") || message.contains("Refused"),
+        "got {message}"
+    );
+    assert!(
+        message.contains("unsigned response, not authenticated"),
+        "got {message}"
+    );
+}
+
+#[tokio::test]
+async fn error_with_bad_signature_is_reported_as_unverified() {
+    let server = MockServer::start(Behavior::ForgedRcode(ResponseCode::Refused)).await;
+
+    let err = server
+        .provider(SECRET)
+        .present(FQDN, VALUE)
+        .await
+        .unwrap_err();
+
+    let message = err.to_string();
+    assert!(
+        message.contains("TSIG verification failed, not authenticated"),
+        "got {message}"
+    );
 }
 
 #[tokio::test]
