@@ -32,6 +32,13 @@ url = "2"
 percent-encoding = "2"
 instant-acme = "0.8"
 sha1 = "0.11"
+# AWS Signature Version 4 for the Route53 provider. Same `digest` 0.11 as sha1.
+hmac = "0.13"
+sha2 = "0.11"
+# Route53 speaks XML. Only the serde deserializer is used.
+quick-xml = { version = "0.42", features = ["serialize"] }
+# SigV4 timestamps. Already in the tree through x509-parser.
+time = { version = "0.3", default-features = false, features = ["std"] }
 hex = "0.4"
 x509-parser = "0.18"
 # Generates the self-signed TLS-ALPN-01 challenge certificate (RFC 8737).

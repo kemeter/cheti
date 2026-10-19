@@ -12,4 +12,5 @@ pub mod ovh;
 pub mod porkbun;
 pub mod powerdns;
 pub mod rfc2136;
+pub mod route53;
 pub mod scaleway;

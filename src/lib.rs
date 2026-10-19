@@ -31,6 +31,7 @@ pub use providers::ovh::{OvhConfig, OvhProvider};
 pub use providers::porkbun::{PorkbunConfig, PorkbunProvider};
 pub use providers::powerdns::{PowerDnsConfig, PowerDnsProvider};
 pub use providers::rfc2136::{Rfc2136Config, Rfc2136Provider, TsigAlgorithm};
+pub use providers::route53::{Route53Config, Route53Provider};
 pub use providers::scaleway::{ScalewayConfig, ScalewayProvider};
 pub use renewal::{
     cert_lifetime, cert_lifetime_at, needs_renewal, needs_renewal_at, needs_renewal_at_checked,
