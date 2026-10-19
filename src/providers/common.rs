@@ -113,6 +113,15 @@ pub(crate) fn validate_fqdn(fqdn: &str) -> Result<(), DnsError> {
         if label.contains('\0') {
             return Err(DnsError::Other("fqdn contains null byte".into()));
         }
+        // Letters, digits, hyphen and underscore (`_acme-challenge`); IDNs
+        // arrive as punycode. Anything else (`&`, `=`, `?`, `/`, spaces) has
+        // no place in a hostname and could alter the API URLs built from it.
+        if !label
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        {
+            return Err(DnsError::Other(format!("invalid character in {fqdn}")));
+        }
     }
     Ok(())
 }
@@ -249,6 +258,25 @@ mod tests {
     #[test]
     fn validate_fqdn_rejects_null_byte() {
         assert!(validate_fqdn("foo\0.bar.com").is_err());
+    }
+
+    #[test]
+    fn validate_fqdn_rejects_url_metacharacters() {
+        for fqdn in [
+            "_acme-challenge.x&per_page=1.com",
+            "foo=bar.com",
+            "foo?.bar.com",
+            "foo/bar.com",
+            "foo bar.com",
+            "*.bar.com",
+        ] {
+            assert!(validate_fqdn(fqdn).is_err(), "{fqdn} must be rejected");
+        }
+    }
+
+    #[test]
+    fn validate_fqdn_accepts_punycode() {
+        assert!(validate_fqdn("_acme-challenge.xn--bcher-kva.example").is_ok());
     }
 
     #[test]
