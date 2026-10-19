@@ -9,7 +9,7 @@ use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
     api_error, encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
-    validate_zone, KeyedMutex,
+    validate_zone, KeyedMutex, SendRetrying,
 };
 
 const HETZNER_API_BASE: &str = "https://api.hetzner.cloud/v1";
@@ -125,7 +125,7 @@ impl HetznerProvider {
             .get(format!("{}/zones", self.config.api_base))
             .query(&[("name", name)])
             .header(reqwest::header::AUTHORIZATION, self.auth_header())
-            .send()
+            .send_retrying()
             .await?;
 
         let status = response.status();
@@ -148,7 +148,7 @@ impl HetznerProvider {
             .http
             .get(self.rrset_url(zone, rname))
             .header(reqwest::header::AUTHORIZATION, self.auth_header())
-            .send()
+            .send_retrying()
             .await?;
 
         let status = response.status();
@@ -192,7 +192,7 @@ impl HetznerProvider {
             .post(format!("{}{path}", self.config.api_base))
             .header(reqwest::header::AUTHORIZATION, self.auth_header())
             .json(&body)
-            .send()
+            .send_retrying()
             .await?;
 
         let status = response.status();
@@ -244,7 +244,7 @@ impl HetznerProvider {
             .http
             .get(format!("{}{path}", self.config.api_base))
             .header(reqwest::header::AUTHORIZATION, self.auth_header())
-            .send()
+            .send_retrying()
             .await?;
 
         let status = response.status();

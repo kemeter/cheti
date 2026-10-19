@@ -11,7 +11,7 @@ use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
     encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
-    validate_zone, KeyedMutex,
+    validate_zone, KeyedMutex, SendRetrying,
 };
 
 const ENV_API_URL: &str = "POWERDNS_API_URL";
@@ -166,7 +166,7 @@ impl PowerDnsProvider {
             .get(self.url(&path))
             .query(&[("rrsets", "false")])
             .header(API_KEY_HEADER, self.config.api_key.expose_secret())
-            .send()
+            .send_retrying()
             .await?;
 
         let status = response.status();
@@ -189,7 +189,7 @@ impl PowerDnsProvider {
             .get(self.url(&path))
             .query(&[("rrset_name", name), ("rrset_type", "TXT")])
             .header(API_KEY_HEADER, self.config.api_key.expose_secret())
-            .send()
+            .send_retrying()
             .await?;
 
         let status = response.status();
@@ -216,7 +216,7 @@ impl PowerDnsProvider {
             .patch(self.url(&path))
             .header(API_KEY_HEADER, self.config.api_key.expose_secret())
             .json(&body)
-            .send()
+            .send_retrying()
             .await?;
 
         let status = response.status();

@@ -81,6 +81,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 Each provider has the same shape: a `*Config` builder, then a `*Provider` constructed from it.
 
+HTTP providers retry a throttled request (429), and an idempotent request the server reports as unavailable (503), up to 3 attempts in total. They honour `Retry-After` up to 10s; a server asking for a longer wait gets no retry, and its error is returned with the delay.
+
 Bunny DNS, DigitalOcean, Google Cloud DNS, Hetzner, Infomaniak, Porkbun, PowerDNS and Route53 are tested against mocks of their documented APIs but have not yet been exercised against the live services. Reports from real accounts are welcome.
 
 ### Bunny DNS

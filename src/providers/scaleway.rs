@@ -10,7 +10,7 @@ use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
     api_error, encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
-    validate_zone, KeyedMutex,
+    validate_zone, KeyedMutex, SendRetrying,
 };
 
 const SCW_API_BASE: &str = "https://api.scaleway.com";
@@ -98,7 +98,7 @@ impl ScalewayProvider {
             .get(&url)
             .header("X-Auth-Token", self.config.secret_key.expose_secret())
             .query(&[("name", rname), ("type", "TXT")])
-            .send()
+            .send_retrying()
             .await?;
 
         let status = response.status();
@@ -148,7 +148,7 @@ impl ScalewayProvider {
             .patch(&url)
             .header("X-Auth-Token", self.config.secret_key.expose_secret())
             .json(&body)
-            .send()
+            .send_retrying()
             .await?;
 
         let status = response.status();
@@ -182,7 +182,7 @@ impl ScalewayProvider {
             .patch(&url)
             .header("X-Auth-Token", self.config.secret_key.expose_secret())
             .json(&body)
-            .send()
+            .send_retrying()
             .await?;
 
         let status = response.status();

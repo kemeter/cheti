@@ -471,6 +471,8 @@ async fn rate_limit_surfaces_reset_time() {
                     "error": { "code": "rate_limit_exceeded", "message": "limit reached" }
                 })),
         )
+        // No Retry-After: retried with backoff, then the last 429 surfaces.
+        .expect(3)
         .mount(&server)
         .await;
 

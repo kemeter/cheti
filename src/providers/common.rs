@@ -1,5 +1,7 @@
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
+use std::time::Duration;
 
 use percent_encoding::{utf8_percent_encode, AsciiSet, PercentEncode, CONTROLS};
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
@@ -8,6 +10,87 @@ use url::Url;
 use crate::error::DnsError;
 
 const MAX_ERROR_BODY: usize = 512;
+
+/// Throttled (429) and unavailable (503) responses are retried, up to this
+/// many attempts in total.
+const MAX_ATTEMPTS: u32 = 3;
+/// Longest `Retry-After` honoured. A server asking for more is not retried:
+/// the response is returned as is, so its error surfaces with the delay.
+const MAX_RETRY_WAIT: Duration = Duration::from_secs(10);
+/// Wait before the first retry when the server gives no usable
+/// `Retry-After`, doubled on each further retry.
+const RETRY_BACKOFF: Duration = Duration::from_secs(1);
+
+/// `send()` with bounded retries on transient responses.
+///
+/// A 429 means the request was not processed, so it is retried whatever the
+/// method. A 503 is only retried for idempotent methods: a POST may have been
+/// applied before the server gave up, and replaying it could create a
+/// duplicate record. The last response is returned unchanged, so callers keep
+/// mapping errors as before.
+pub(crate) trait SendRetrying {
+    fn send_retrying(
+        self,
+    ) -> impl Future<Output = Result<reqwest::Response, reqwest::Error>> + Send;
+}
+
+impl SendRetrying for reqwest::RequestBuilder {
+    async fn send_retrying(self) -> Result<reqwest::Response, reqwest::Error> {
+        let method = self
+            .try_clone()
+            .and_then(|b| b.build().ok())
+            .map(|r| r.method().clone());
+        let mut request = self;
+        let mut attempt = 1;
+        loop {
+            // A builder whose body cannot be cloned (a stream) is sent once.
+            let next = request.try_clone();
+            let response = request.send().await?;
+            let (Some(next), Some(method)) = (next, method.as_ref()) else {
+                return Ok(response);
+            };
+            if attempt >= MAX_ATTEMPTS {
+                return Ok(response);
+            }
+            let Some(wait) = retry_delay(method, response.status(), response.headers(), attempt)
+            else {
+                return Ok(response);
+            };
+            tokio::time::sleep(wait).await;
+            request = next;
+            attempt += 1;
+        }
+    }
+}
+
+/// How long to wait before retrying after `attempt` (1-based) got `status`,
+/// or `None` when the response must be returned as is.
+fn retry_delay(
+    method: &reqwest::Method,
+    status: reqwest::StatusCode,
+    headers: &reqwest::header::HeaderMap,
+    attempt: u32,
+) -> Option<Duration> {
+    let retryable = match status {
+        reqwest::StatusCode::TOO_MANY_REQUESTS => true,
+        reqwest::StatusCode::SERVICE_UNAVAILABLE => method.is_idempotent(),
+        _ => false,
+    };
+    if !retryable {
+        return None;
+    }
+    // Only the delay-seconds form is read; an HTTP-date falls back to backoff.
+    let retry_after = headers
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(Duration::from_secs);
+    match retry_after {
+        Some(wait) if wait > MAX_RETRY_WAIT => None,
+        Some(wait) => Some(wait),
+        None => Some(RETRY_BACKOFF * 2u32.pow(attempt - 1)),
+    }
+}
 
 const PATH_SEGMENT: &AsciiSet = &CONTROLS
     .add(b' ')
@@ -305,6 +388,164 @@ mod tests {
     #[test]
     fn validate_https_base_rejects_userinfo_smuggling() {
         assert!(validate_https_base("http://localhost@attacker.com", "test").is_err());
+    }
+
+    mod retry {
+        use super::*;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, Request, ResponseTemplate};
+
+        /// Answers `failures` with `status` (and `Retry-After: retry_after`),
+        /// then 200. Returns the server and the request counter.
+        async fn flaky(
+            verb: &str,
+            status: u16,
+            retry_after: Option<&str>,
+            failures: usize,
+        ) -> (MockServer, Arc<AtomicUsize>) {
+            let server = MockServer::start().await;
+            let hits = Arc::new(AtomicUsize::new(0));
+            let counter = hits.clone();
+            let retry_after = retry_after.map(str::to_string);
+            Mock::given(method(verb))
+                .respond_with(move |_: &Request| {
+                    if counter.fetch_add(1, Ordering::SeqCst) < failures {
+                        let mut r = ResponseTemplate::new(status);
+                        if let Some(v) = &retry_after {
+                            r = r.insert_header("retry-after", v.as_str());
+                        }
+                        r
+                    } else {
+                        ResponseTemplate::new(200)
+                    }
+                })
+                .mount(&server)
+                .await;
+            (server, hits)
+        }
+
+        #[tokio::test]
+        async fn rate_limited_request_is_retried_until_it_succeeds() {
+            let (server, hits) = flaky("POST", 429, Some("0"), 2).await;
+            let response = reqwest::Client::new()
+                .post(server.uri())
+                .body("payload")
+                .send_retrying()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), 200);
+            assert_eq!(hits.load(Ordering::SeqCst), 3);
+        }
+
+        #[tokio::test]
+        async fn gives_up_after_max_attempts_with_the_last_response() {
+            let (server, hits) = flaky("GET", 429, Some("0"), usize::MAX).await;
+            let response = reqwest::Client::new()
+                .get(server.uri())
+                .send_retrying()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), 429);
+            assert_eq!(hits.load(Ordering::SeqCst), MAX_ATTEMPTS as usize);
+        }
+
+        #[tokio::test]
+        async fn unavailable_idempotent_request_is_retried() {
+            let (server, hits) = flaky("DELETE", 503, Some("0"), 1).await;
+            let response = reqwest::Client::new()
+                .delete(server.uri())
+                .send_retrying()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), 200);
+            assert_eq!(hits.load(Ordering::SeqCst), 2);
+        }
+
+        #[tokio::test]
+        async fn unavailable_post_is_not_replayed() {
+            let (server, hits) = flaky("POST", 503, Some("0"), 1).await;
+            let response = reqwest::Client::new()
+                .post(server.uri())
+                .send_retrying()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), 503);
+            assert_eq!(hits.load(Ordering::SeqCst), 1);
+        }
+
+        #[tokio::test]
+        async fn retry_after_beyond_the_cap_is_not_waited_for() {
+            let (server, hits) = flaky("GET", 429, Some("60"), 1).await;
+            let response = reqwest::Client::new()
+                .get(server.uri())
+                .send_retrying()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), 429);
+            assert_eq!(hits.load(Ordering::SeqCst), 1);
+        }
+
+        #[tokio::test]
+        async fn other_errors_are_not_retried() {
+            let (server, hits) = flaky("GET", 500, None, 1).await;
+            let response = reqwest::Client::new()
+                .get(server.uri())
+                .send_retrying()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), 500);
+            assert_eq!(hits.load(Ordering::SeqCst), 1);
+        }
+
+        fn headers(retry_after: Option<&str>) -> reqwest::header::HeaderMap {
+            let mut h = reqwest::header::HeaderMap::new();
+            if let Some(v) = retry_after {
+                h.insert(reqwest::header::RETRY_AFTER, v.parse().unwrap());
+            }
+            h
+        }
+
+        #[test]
+        fn missing_retry_after_backs_off_exponentially() {
+            let get = reqwest::Method::GET;
+            let status = reqwest::StatusCode::TOO_MANY_REQUESTS;
+            assert_eq!(
+                retry_delay(&get, status, &headers(None), 1),
+                Some(Duration::from_secs(1))
+            );
+            assert_eq!(
+                retry_delay(&get, status, &headers(None), 2),
+                Some(Duration::from_secs(2))
+            );
+        }
+
+        #[test]
+        fn retry_after_date_falls_back_to_backoff() {
+            let date = Some("Wed, 21 Oct 2026 07:28:00 GMT");
+            assert_eq!(
+                retry_delay(
+                    &reqwest::Method::GET,
+                    reqwest::StatusCode::TOO_MANY_REQUESTS,
+                    &headers(date),
+                    1
+                ),
+                Some(RETRY_BACKOFF)
+            );
+        }
+
+        #[test]
+        fn retry_after_seconds_are_honoured() {
+            assert_eq!(
+                retry_delay(
+                    &reqwest::Method::PUT,
+                    reqwest::StatusCode::SERVICE_UNAVAILABLE,
+                    &headers(Some("4")),
+                    1
+                ),
+                Some(Duration::from_secs(4))
+            );
+        }
     }
 
     #[tokio::test]
