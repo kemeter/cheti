@@ -14,12 +14,14 @@
 //!
 //! ```no_run
 //! use cheti::tls_alpn::{TlsAlpn01Solver, ChallengeResponder};
-//! # async fn run<R: ChallengeResponder>(order: instant_acme::Order, responder: R)
+//! # async fn run<R: ChallengeResponder + 'static>(order: instant_acme::Order, responder: R)
 //! #   -> Result<(), cheti::DnsError> {
 //! let solver = TlsAlpn01Solver::new(responder);
 //! let (cert_chain_pem, key_pem) = solver.solve_and_finalize(order).await?;
 //! # Ok(()) }
 //! ```
+
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use instant_acme::{
@@ -27,6 +29,7 @@ use instant_acme::{
 };
 use rcgen::{CertificateParams, CustomExtension, KeyPair};
 
+use crate::cleanup::CleanupGuard;
 use crate::error::DnsError;
 
 /// The ALPN protocol identifier a TLS-ALPN-01 validator negotiates. A server
@@ -108,37 +111,59 @@ pub fn build_challenge_certificate(
 
 /// Drives an ACME order through the TLS-ALPN-01 challenge to a certificate,
 /// delegating certificate presentation to a [`ChallengeResponder`].
-pub struct TlsAlpn01Solver<R: ChallengeResponder> {
-    responder: R,
+pub struct TlsAlpn01Solver<R: ChallengeResponder + 'static> {
+    responder: Arc<R>,
 }
 
-impl<R: ChallengeResponder> TlsAlpn01Solver<R> {
+impl<R: ChallengeResponder + 'static> TlsAlpn01Solver<R> {
     pub fn new(responder: R) -> Self {
-        Self { responder }
+        Self {
+            responder: Arc::new(responder),
+        }
     }
 
     /// Present each domain's challenge certificate, mark the challenges ready,
     /// then finalize the order. Returns `(certificate_chain_pem, private_key_pem)`.
     ///
     /// Presented certificates are torn down before returning, on success and on
-    /// error, on a **best-effort** basis: a `cleanup` that itself fails is
-    /// logged as swallowed, not surfaced, and — as with the DNS-01 solver —
-    /// dropping this future mid-flight (shutdown, timeout) skips the remaining
-    /// teardown. A responder that must not leak challenge material on those
-    /// paths should give its presentations a short lease of their own.
+    /// error. If this future is dropped before completing (shutdown, timeout),
+    /// the domains still presented are torn down from a task spawned on the
+    /// current Tokio runtime. Teardown is **best-effort** either way: a
+    /// `cleanup` that itself fails is swallowed, not surfaced, and the spawned
+    /// task does not run if the runtime shuts down first. A responder that must
+    /// not leak challenge material should give its presentations a short lease
+    /// of their own.
     pub async fn solve_and_finalize(&self, mut order: Order) -> Result<(String, String), DnsError> {
-        let presented = match self.present_all(&mut order).await {
-            Ok(domains) => domains,
-            Err(e) => return Err(e),
+        let mut presented = self.cleanup_guard();
+        let outcome = match self.present_all(&mut order, &mut presented).await {
+            Ok(()) => finalize_order(&mut order).await,
+            Err(e) => Err(e),
         };
-        let outcome = finalize_order(&mut order).await;
-        self.cleanup_all(&presented).await;
+        presented.run().await;
         outcome
     }
 
+    /// Teardown of presented domains. Cleanup errors are swallowed (cheti
+    /// carries no logger, matching the DNS-01 solver): the caller's outcome —
+    /// the issued certificate or the primary error — is what matters, and a
+    /// stale challenge certificate is inert once validation is over.
+    fn cleanup_guard(&self) -> CleanupGuard<String> {
+        let responder = Arc::clone(&self.responder);
+        CleanupGuard::new(move |domain: String| {
+            let responder = Arc::clone(&responder);
+            async move {
+                let _ = responder.cleanup(&domain).await;
+            }
+        })
+    }
+
     /// Present every pending TLS-ALPN-01 challenge in the order and mark it
-    /// ready. Returns the domains presented, so the caller can tear them down.
-    async fn present_all(&self, order: &mut Order) -> Result<Vec<String>, DnsError> {
+    /// ready, recording each domain in `presented` so it is torn down.
+    async fn present_all(
+        &self,
+        order: &mut Order,
+        presented: &mut CleanupGuard<String>,
+    ) -> Result<(), DnsError> {
         // Collect the challenges first: instant_acme's authorization stream
         // borrows the order, so we can't call `set_ready` (which also borrows)
         // while iterating. Each entry is (domain, digest, challenge_url).
@@ -170,42 +195,19 @@ impl<R: ChallengeResponder> TlsAlpn01Solver<R> {
             }
         }
 
-        let mut presented: Vec<String> = Vec::new();
         for (domain, digest, url) in pending {
             let cert = build_challenge_certificate(&domain, &digest)?;
-            if let Err(e) = self
-                .responder
+            // Recorded before `present`: it may install the certificate and
+            // still fail (e.g. control-plane write succeeded, acknowledgement
+            // didn't), so this domain is torn down too, not only earlier ones.
+            presented.push(domain.clone());
+            self.responder
                 .present(&domain, cert.cert_der, cert.key_der)
-                .await
-            {
-                // `present` may have installed the certificate before failing
-                // (e.g. control-plane write succeeded, acknowledgement didn't),
-                // so tear this domain down too — not only the earlier ones.
-                let _ = self.responder.cleanup(&domain).await;
-                self.cleanup_all(&presented).await;
-                return Err(e);
-            }
-            presented.push(domain);
-
-            if let Err(e) = set_ready_by_url(order, &url).await {
-                self.cleanup_all(&presented).await;
-                return Err(e);
-            }
+                .await?;
+            set_ready_by_url(order, &url).await?;
         }
 
-        Ok(presented)
-    }
-
-    /// Best-effort teardown of every presented domain. Cleanup errors are
-    /// swallowed (cheti carries no logger, matching the DNS-01 solver): the
-    /// caller's outcome — the issued certificate or the primary error — is what
-    /// matters, and a stale challenge certificate is inert once validation is
-    /// over. A responder that needs a hard guarantee should lease its
-    /// presentations rather than rely on this call.
-    async fn cleanup_all(&self, domains: &[String]) {
-        for domain in domains {
-            let _ = self.responder.cleanup(domain).await;
-        }
+        Ok(())
     }
 }
 
