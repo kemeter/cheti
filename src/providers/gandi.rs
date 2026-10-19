@@ -48,7 +48,7 @@ impl GandiConfig {
     pub fn with_zone(mut self, zone: impl Into<String>) -> Result<Self, DnsError> {
         let zone = zone.into();
         validate_zone(&zone)?;
-        self.zone_override = Some(zone);
+        self.zone_override = Some(zone.trim_end_matches('.').to_ascii_lowercase());
         Ok(self)
     }
 }
@@ -200,6 +200,9 @@ impl GandiProvider {
 impl DnsProvider for GandiProvider {
     async fn present(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
         validate_fqdn(fqdn)?;
+        // DNS names are case-insensitive; compare and send them lowercased.
+        let fqdn = fqdn.to_ascii_lowercase();
+        let fqdn = fqdn.as_str();
         validate_acme_value(value)?;
         let zone = self.resolve_zone(fqdn).await?;
         let rname = relative_name(fqdn, &zone)?;
@@ -215,6 +218,9 @@ impl DnsProvider for GandiProvider {
 
     async fn cleanup(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
         validate_fqdn(fqdn)?;
+        // DNS names are case-insensitive; compare and send them lowercased.
+        let fqdn = fqdn.to_ascii_lowercase();
+        let fqdn = fqdn.as_str();
         let zone = self.resolve_zone(fqdn).await?;
         let rname = relative_name(fqdn, &zone)?;
 

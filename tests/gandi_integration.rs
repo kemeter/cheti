@@ -301,3 +301,33 @@ async fn concurrent_present_calls_are_serialized() {
     assert!(final_state.contains(&VALUE.to_string()));
     assert!(final_state.contains(&OTHER_VALUE.to_string()));
 }
+
+#[tokio::test]
+async fn mixed_case_names_are_normalised() {
+    let server = MockServer::start().await;
+
+    // Both the FQDN and the zone override reach the API lowercased.
+    Mock::given(method("GET"))
+        .and(path(RECORD_PATH))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path(RECORD_PATH))
+        .respond_with(ResponseTemplate::new(201))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let config = GandiConfig::new("test-token")
+        .with_api_base(format!("{}/", server.uri()))
+        .unwrap()
+        .with_zone("Example.COM.")
+        .unwrap();
+    let provider = GandiProvider::new(config).unwrap();
+    provider
+        .present("_ACME-Challenge.Example.com", VALUE)
+        .await
+        .unwrap();
+}

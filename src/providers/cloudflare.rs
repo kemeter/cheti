@@ -55,7 +55,7 @@ impl CloudflareConfig {
         let zone = zone.into();
         validate_zone(&zone)?;
         self.zone_override = Some(ZoneOverride {
-            name: zone,
+            name: zone.trim_end_matches('.').to_ascii_lowercase(),
             id: None,
         });
         Ok(self)
@@ -71,7 +71,7 @@ impl CloudflareConfig {
         let zone = zone.into();
         validate_zone(&zone)?;
         self.zone_override = Some(ZoneOverride {
-            name: zone,
+            name: zone.trim_end_matches('.').to_ascii_lowercase(),
             id: Some(zone_id.into()),
         });
         Ok(self)
@@ -323,6 +323,9 @@ struct CreateRecordBody<'a> {
 impl DnsProvider for CloudflareProvider {
     async fn present(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
         validate_fqdn(fqdn)?;
+        // DNS names are case-insensitive; compare and send them lowercased.
+        let fqdn = fqdn.to_ascii_lowercase();
+        let fqdn = fqdn.as_str();
         validate_acme_value(value)?;
         let zone_name = self.resolve_zone_name(fqdn).await?;
         let zone_id = self.resolve_zone_id(&zone_name).await?;
@@ -343,6 +346,9 @@ impl DnsProvider for CloudflareProvider {
 
     async fn cleanup(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
         validate_fqdn(fqdn)?;
+        // DNS names are case-insensitive; compare and send them lowercased.
+        let fqdn = fqdn.to_ascii_lowercase();
+        let fqdn = fqdn.as_str();
         let zone_name = self.resolve_zone_name(fqdn).await?;
         let zone_id = self.resolve_zone_id(&zone_name).await?;
 
