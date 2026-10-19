@@ -41,6 +41,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --all-targets
+      # --all-targets skips doctests, which hold the README examples.
+      - run: cargo test --doc
 
   pebble-e2e:
     runs-on: ubuntu-latest
