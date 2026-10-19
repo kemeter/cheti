@@ -45,7 +45,7 @@ impl CloudflareConfig {
     pub fn with_api_base(mut self, api_base: impl Into<String>) -> Result<Self, DnsError> {
         let base = api_base.into();
         validate_https_base(&base, PROVIDER)?;
-        self.api_base = base;
+        self.api_base = base.trim_end_matches('/').to_string();
         Ok(self)
     }
 
@@ -55,7 +55,7 @@ impl CloudflareConfig {
         let zone = zone.into();
         validate_zone(&zone)?;
         self.zone_override = Some(ZoneOverride {
-            name: zone,
+            name: zone.trim_end_matches('.').to_ascii_lowercase(),
             id: None,
         });
         Ok(self)
@@ -71,7 +71,7 @@ impl CloudflareConfig {
         let zone = zone.into();
         validate_zone(&zone)?;
         self.zone_override = Some(ZoneOverride {
-            name: zone,
+            name: zone.trim_end_matches('.').to_ascii_lowercase(),
             id: Some(zone_id.into()),
         });
         Ok(self)
@@ -323,6 +323,9 @@ struct CreateRecordBody<'a> {
 impl DnsProvider for CloudflareProvider {
     async fn present(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
         validate_fqdn(fqdn)?;
+        // DNS names are case-insensitive; compare and send them lowercased.
+        let fqdn = fqdn.to_ascii_lowercase();
+        let fqdn = fqdn.as_str();
         validate_acme_value(value)?;
         let zone_name = self.resolve_zone_name(fqdn).await?;
         let zone_id = self.resolve_zone_id(&zone_name).await?;
@@ -343,6 +346,9 @@ impl DnsProvider for CloudflareProvider {
 
     async fn cleanup(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
         validate_fqdn(fqdn)?;
+        // DNS names are case-insensitive; compare and send them lowercased.
+        let fqdn = fqdn.to_ascii_lowercase();
+        let fqdn = fqdn.as_str();
         let zone_name = self.resolve_zone_name(fqdn).await?;
         let zone_id = self.resolve_zone_id(&zone_name).await?;
 
@@ -372,6 +378,14 @@ mod tests {
     fn with_api_base_accepts_localhost_for_tests() {
         let cfg = CloudflareConfig::new("token");
         assert!(cfg.with_api_base("http://localhost:8080").is_ok());
+    }
+
+    #[test]
+    fn with_api_base_strips_trailing_slash() {
+        let cfg = CloudflareConfig::new("token")
+            .with_api_base("https://api.example.com/v1/")
+            .unwrap();
+        assert_eq!(cfg.api_base, "https://api.example.com/v1");
     }
 
     #[test]

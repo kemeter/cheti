@@ -38,7 +38,7 @@ impl GandiConfig {
     pub fn with_api_base(mut self, api_base: impl Into<String>) -> Result<Self, DnsError> {
         let base = api_base.into();
         validate_https_base(&base, PROVIDER)?;
-        self.api_base = base;
+        self.api_base = base.trim_end_matches('/').to_string();
         Ok(self)
     }
 
@@ -48,7 +48,7 @@ impl GandiConfig {
     pub fn with_zone(mut self, zone: impl Into<String>) -> Result<Self, DnsError> {
         let zone = zone.into();
         validate_zone(&zone)?;
-        self.zone_override = Some(zone);
+        self.zone_override = Some(zone.trim_end_matches('.').to_ascii_lowercase());
         Ok(self)
     }
 }
@@ -200,6 +200,9 @@ impl GandiProvider {
 impl DnsProvider for GandiProvider {
     async fn present(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
         validate_fqdn(fqdn)?;
+        // DNS names are case-insensitive; compare and send them lowercased.
+        let fqdn = fqdn.to_ascii_lowercase();
+        let fqdn = fqdn.as_str();
         validate_acme_value(value)?;
         let zone = self.resolve_zone(fqdn).await?;
         let rname = relative_name(fqdn, &zone)?;
@@ -215,6 +218,9 @@ impl DnsProvider for GandiProvider {
 
     async fn cleanup(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
         validate_fqdn(fqdn)?;
+        // DNS names are case-insensitive; compare and send them lowercased.
+        let fqdn = fqdn.to_ascii_lowercase();
+        let fqdn = fqdn.as_str();
         let zone = self.resolve_zone(fqdn).await?;
         let rname = relative_name(fqdn, &zone)?;
 
@@ -244,6 +250,14 @@ mod tests {
     fn with_api_base_accepts_localhost_for_tests() {
         let cfg = GandiConfig::new("dummy");
         assert!(cfg.with_api_base("http://localhost:8080").is_ok());
+    }
+
+    #[test]
+    fn with_api_base_strips_trailing_slash() {
+        let cfg = GandiConfig::new("dummy")
+            .with_api_base("https://api.example.com/v1/")
+            .unwrap();
+        assert_eq!(cfg.api_base, "https://api.example.com/v1");
     }
 
     #[test]
