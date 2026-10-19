@@ -162,21 +162,24 @@ pub(crate) async fn api_error(
     status: reqwest::StatusCode,
     response: reqwest::Response,
 ) -> DnsError {
-    let raw = response.text().await.unwrap_or_default();
-    let text = if raw.len() > MAX_ERROR_BODY {
-        let mut cut = MAX_ERROR_BODY;
-        while cut > 0 && !raw.is_char_boundary(cut) {
-            cut -= 1;
-        }
-        let mut truncated = raw[..cut].to_string();
-        truncated.push_str("…(truncated)");
-        truncated
-    } else {
-        raw
-    };
+    let text = truncate_error_body(response.text().await.unwrap_or_default());
     DnsError::Api(format!(
         "{provider} {method} {path} returned {status}: {text}"
     ))
+}
+
+/// Caps a provider-supplied error text so a large body cannot flood logs.
+pub(crate) fn truncate_error_body(raw: String) -> String {
+    if raw.len() <= MAX_ERROR_BODY {
+        return raw;
+    }
+    let mut cut = MAX_ERROR_BODY;
+    while cut > 0 && !raw.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let mut truncated = raw[..cut].to_string();
+    truncated.push_str("…(truncated)");
+    truncated
 }
 
 #[cfg(test)]
