@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use std::env;
+use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use secrecy::{ExposeSecret, SecretString};
@@ -68,6 +69,10 @@ pub struct OvhProvider {
     config: OvhConfig,
     http: reqwest::Client,
     locks: KeyedMutex,
+    /// Seconds to add to the local clock to match the OVH API clock, which
+    /// rejects signatures whose timestamp drifts. Measured once via
+    /// `/auth/time`; unset (local clock used as-is) until that succeeds.
+    time_delta: OnceLock<i64>,
 }
 
 impl OvhProvider {
@@ -81,6 +86,7 @@ impl OvhProvider {
             config,
             http,
             locks: KeyedMutex::new(PROVIDER),
+            time_delta: OnceLock::new(),
         })
     }
 
@@ -161,13 +167,34 @@ impl OvhProvider {
             .unwrap_or(0)
     }
 
+    /// Measures the offset between the local clock and the OVH API clock.
+    /// A failure leaves it unset, so the local clock is used and the next
+    /// operation tries again.
+    async fn sync_time(&self) {
+        if self.time_delta.get().is_some() {
+            return;
+        }
+        let response = self
+            .http
+            .get(format!("{}/auth/time", self.config.api_base))
+            .send()
+            .await;
+        let Ok(response) = response else { return };
+        if !response.status().is_success() {
+            return;
+        }
+        if let Ok(server_time) = response.json::<i64>().await {
+            let _ = self.time_delta.set(server_time - Self::now_timestamp());
+        }
+    }
+
     fn signed_request(
         &self,
         method: reqwest::Method,
         url: &str,
         body: &str,
     ) -> reqwest::RequestBuilder {
-        let ts = Self::now_timestamp();
+        let ts = Self::now_timestamp() + self.time_delta.get().copied().unwrap_or(0);
         let signature = self.sign_request(method.as_str(), url, body, ts);
         let mut req = self
             .http
@@ -331,6 +358,7 @@ impl DnsProvider for OvhProvider {
         let sub_domain = relative_name(fqdn, &zone)?;
 
         let _guard = self.locks.lock(&format!("{zone}|{sub_domain}")).await;
+        self.sync_time().await;
 
         // OVH stores each TXT line as its own record. Check existing records
         // so we don't create a duplicate if present was called twice for the
@@ -355,6 +383,7 @@ impl DnsProvider for OvhProvider {
         let sub_domain = relative_name(fqdn, &zone)?;
 
         let _guard = self.locks.lock(&format!("{zone}|{sub_domain}")).await;
+        self.sync_time().await;
 
         let existing_ids = self.list_records(&zone, &sub_domain).await?;
         let mut deleted_any = false;

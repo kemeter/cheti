@@ -389,3 +389,54 @@ async fn concurrent_present_calls_are_serialized() {
     assert!(values.contains(&VALUE));
     assert!(values.contains(&OTHER_VALUE));
 }
+
+#[tokio::test]
+async fn requests_are_signed_with_the_ovh_server_clock() {
+    use sha1::{Digest, Sha1};
+
+    let server = MockServer::start().await;
+    let local_now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    // The OVH clock is one hour ahead of ours.
+    let server_now = local_now + 3600;
+
+    Mock::given(method("GET"))
+        .and(path("/auth/time"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!(server_now)))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let records_url = format!(
+        "{}{RECORDS_PATH}?fieldType=TXT&subDomain={SUB_DOMAIN}",
+        server.uri()
+    );
+    ovh_signed()
+        .and(method("GET"))
+        .and(path(RECORDS_PATH))
+        .respond_with(move |req: &Request| {
+            let header = |name: &str| req.headers.get(name).unwrap().to_str().unwrap().to_string();
+            let ts: i64 = header("x-ovh-timestamp").parse().unwrap();
+            assert!(
+                (ts - server_now).abs() <= 5,
+                "timestamp {ts} must follow the server clock {server_now}"
+            );
+            let mut hasher = Sha1::new();
+            hasher.update(format!(
+                "test-app-secret+test-consumer-key+GET+{records_url}++{ts}"
+            ));
+            let expected = format!("$1${}", hex::encode(hasher.finalize()));
+            assert_eq!(header("x-ovh-signature"), expected);
+            ResponseTemplate::new(200).set_body_json(json!([]))
+        })
+        .expect(2)
+        .mount(&server)
+        .await;
+
+    // Nothing to remove: cleanup only lists records. Two calls, one time sync.
+    let provider = build_provider(&server);
+    provider.cleanup(FQDN, VALUE).await.unwrap();
+    provider.cleanup(FQDN, VALUE).await.unwrap();
+}
