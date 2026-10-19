@@ -8,5 +8,6 @@ pub mod hetzner;
 pub mod infomaniak;
 pub mod ovh;
 pub mod porkbun;
+pub mod powerdns;
 pub mod rfc2136;
 pub mod scaleway;

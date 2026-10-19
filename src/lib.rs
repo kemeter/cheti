@@ -27,6 +27,7 @@ pub use providers::hetzner::{HetznerConfig, HetznerProvider};
 pub use providers::infomaniak::{InfomaniakConfig, InfomaniakProvider};
 pub use providers::ovh::{OvhConfig, OvhProvider};
 pub use providers::porkbun::{PorkbunConfig, PorkbunProvider};
+pub use providers::powerdns::{PowerDnsConfig, PowerDnsProvider};
 pub use providers::rfc2136::{Rfc2136Config, Rfc2136Provider, TsigAlgorithm};
 pub use providers::scaleway::{ScalewayConfig, ScalewayProvider};
 pub use renewal::{
