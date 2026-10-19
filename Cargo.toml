@@ -18,7 +18,7 @@ testing = []
 [dependencies]
 async-trait = "0.1"
 thiserror = "2"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "query"] }
 hickory-resolver = "0.26"
 # Builds and TSIG-signs RFC 2136 UPDATE messages. `dnssec-ring` is what
 # enables TSIG; ring is already in the tree through rustls and rcgen.
