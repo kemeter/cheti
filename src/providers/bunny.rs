@@ -9,7 +9,7 @@ use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
     api_error, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
-    validate_zone, KeyedMutex,
+    validate_zone, KeyedMutex, SendRetrying,
 };
 
 const BUNNY_API_BASE: &str = "https://api.bunny.net";
@@ -155,7 +155,7 @@ impl BunnyProvider {
                     ("page", page_param.as_str()),
                 ])
                 .header(ACCESS_KEY_HEADER, self.config.api_key.expose_secret())
-                .send()
+                .send_retrying()
                 .await?;
 
             let status = response.status();
@@ -195,7 +195,7 @@ impl BunnyProvider {
             .http
             .get(self.url(&path))
             .header(ACCESS_KEY_HEADER, self.config.api_key.expose_secret())
-            .send()
+            .send_retrying()
             .await?;
 
         let status = response.status();
@@ -228,7 +228,7 @@ impl BunnyProvider {
             .put(self.url(&path))
             .header(ACCESS_KEY_HEADER, self.config.api_key.expose_secret())
             .json(&body)
-            .send()
+            .send_retrying()
             .await?;
 
         let status = response.status();
@@ -247,7 +247,7 @@ impl BunnyProvider {
             .http
             .delete(self.url(&path))
             .header(ACCESS_KEY_HEADER, self.config.api_key.expose_secret())
-            .send()
+            .send_retrying()
             .await?;
 
         let status = response.status();

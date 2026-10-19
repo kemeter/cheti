@@ -11,7 +11,7 @@ use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
     api_error, encode_path, validate_acme_value, validate_fqdn, validate_https_base, validate_zone,
-    KeyedMutex,
+    KeyedMutex, SendRetrying,
 };
 
 const CF_API_BASE: &str = "https://api.cloudflare.com/client/v4";
@@ -141,7 +141,7 @@ impl CloudflareProvider {
             .http
             .get(&url)
             .bearer_auth(self.config.api_token.expose_secret())
-            .send()
+            .send_retrying()
             .await?;
         let status = response.status();
         if !status.is_success() {
@@ -193,7 +193,7 @@ impl CloudflareProvider {
             .http
             .get(&url)
             .bearer_auth(self.config.api_token.expose_secret())
-            .send()
+            .send_retrying()
             .await?;
         let status = response.status();
         if !status.is_success() {
@@ -227,7 +227,7 @@ impl CloudflareProvider {
             .post(&url)
             .bearer_auth(self.config.api_token.expose_secret())
             .json(&body)
-            .send()
+            .send_retrying()
             .await?;
         let status = response.status();
         if !status.is_success() {
@@ -251,7 +251,7 @@ impl CloudflareProvider {
             .http
             .delete(&url)
             .bearer_auth(self.config.api_token.expose_secret())
-            .send()
+            .send_retrying()
             .await?;
         let status = response.status();
         if !status.is_success() && status.as_u16() != 404 {

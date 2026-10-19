@@ -19,6 +19,7 @@ use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
     api_error, encode_path, validate_acme_value, validate_fqdn, validate_https_base, KeyedMutex,
+    SendRetrying,
 };
 
 const GCDNS_API_BASE: &str = "https://dns.googleapis.com/dns/v1";
@@ -249,7 +250,7 @@ impl GoogleCloudDnsProvider {
             .http
             .post(&self.config.token_uri)
             .form(&[("grant_type", JWT_GRANT_TYPE), ("assertion", &assertion)])
-            .send()
+            .send_retrying()
             .await?;
 
         let status = response.status();
@@ -316,7 +317,7 @@ impl GoogleCloudDnsProvider {
             .get(format!("{}{path}", self.config.api_base))
             .query(query)
             .bearer_auth(token)
-            .send()
+            .send_retrying()
             .await?;
         let status = response.status();
         if !status.is_success() {
@@ -414,7 +415,7 @@ impl GoogleCloudDnsProvider {
             .post(format!("{}{path}", self.config.api_base))
             .bearer_auth(token)
             .json(&body)
-            .send()
+            .send_retrying()
             .await?;
 
         let status = response.status();

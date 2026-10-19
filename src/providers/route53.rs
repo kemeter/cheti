@@ -15,6 +15,7 @@ use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
     truncate_error_body, validate_acme_value, validate_fqdn, validate_https_base, KeyedMutex,
+    SendRetrying,
 };
 
 const ROUTE53_API_BASE: &str = "https://route53.amazonaws.com/2013-04-01";
@@ -201,7 +202,7 @@ impl Route53Provider {
                 .body(payload);
         }
 
-        let response = request.send().await?;
+        let response = request.send_retrying().await?;
         let status = response.status();
         let text = response.text().await?;
         if !status.is_success() {

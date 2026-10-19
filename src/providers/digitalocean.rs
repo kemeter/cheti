@@ -10,7 +10,7 @@ use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
     api_error, encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
-    validate_zone, KeyedMutex,
+    validate_zone, KeyedMutex, SendRetrying,
 };
 
 const DO_API_BASE: &str = "https://api.digitalocean.com/v2";
@@ -134,7 +134,7 @@ impl DigitalOceanProvider {
                     ("page", page_param.as_str()),
                 ])
                 .bearer_auth(self.config.token.expose_secret())
-                .send()
+                .send_retrying()
                 .await?;
 
             let status = response.status();
@@ -185,7 +185,7 @@ impl DigitalOceanProvider {
             .post(self.records_url(zone))
             .bearer_auth(self.config.token.expose_secret())
             .json(&body)
-            .send()
+            .send_retrying()
             .await?;
 
         let status = response.status();
@@ -205,7 +205,7 @@ impl DigitalOceanProvider {
             .http
             .delete(self.record_item_url(zone, record_id))
             .bearer_auth(self.config.token.expose_secret())
-            .send()
+            .send_retrying()
             .await?;
 
         let status = response.status();

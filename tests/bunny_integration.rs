@@ -516,7 +516,9 @@ async fn http_429_surfaces_as_rate_limit() {
 
     Mock::given(method("PUT"))
         .and(path(RECORDS_PATH))
-        .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "7"))
+        // Longer than the client is willing to wait, so it is not retried.
+        .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "60"))
+        .expect(1)
         .mount(&server)
         .await;
 
@@ -524,7 +526,35 @@ async fn http_429_surfaces_as_rate_limit() {
     let err = provider.present(FQDN, VALUE).await.unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("rate limited"), "{msg}");
-    assert!(msg.contains("retry after 7s"), "{msg}");
+    assert!(msg.contains("retry after 60s"), "{msg}");
+}
+
+#[tokio::test]
+async fn present_succeeds_after_a_short_rate_limit() {
+    let server = MockServer::start().await;
+    mount_zone_list(&server).await;
+    mount_zone(&server, vec![]).await;
+
+    Mock::given(method("PUT"))
+        .and(path(RECORDS_PATH))
+        .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "0"))
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path(RECORDS_PATH))
+        .respond_with(ResponseTemplate::new(201).set_body_json(txt_record(
+            1,
+            "_acme-challenge",
+            VALUE,
+        )))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = build_provider(&server);
+    provider.present(FQDN, VALUE).await.unwrap();
 }
 
 #[tokio::test]
