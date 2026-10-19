@@ -7,7 +7,7 @@ ACME DNS-01 challenge library for Rust, with pluggable DNS providers.
 ## Features
 
 - **DNS-01 challenges only** — works for wildcards and for domains behind a firewall, no HTTP-01 server needed
-- **Built-in providers**: Cloudflare, deSEC, DigitalOcean, Gandi, Hetzner, Infomaniak, OVH, Porkbun, Scaleway, and RFC 2136 (TSIG-signed dynamic updates) for self-hosted servers such as BIND, Knot DNS or PowerDNS
+- **Built-in providers**: Bunny DNS, Cloudflare, deSEC, DigitalOcean, Gandi, Google Cloud DNS, Hetzner, Infomaniak, OVH, Porkbun, PowerDNS (HTTP API), Route53, Scaleway, and RFC 2136 (TSIG-signed dynamic updates) for self-hosted servers such as BIND, Knot DNS or PowerDNS
 - **Bring-your-own provider**: implement the `DnsProvider` trait for anything else
 - **Persisted ACME accounts** via `AccountStore` so you don't burn through your CA's account-creation rate limit
 - **Renewal helper** that reads a leaf certificate's expiry and tells you when to re-issue
@@ -81,7 +81,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 Each provider has the same shape: a `*Config` builder, then a `*Provider` constructed from it.
 
-DigitalOcean, Hetzner, Infomaniak and Porkbun are tested against mocks of their documented APIs but have not yet been exercised against the live services. Reports from real accounts are welcome.
+Bunny DNS, DigitalOcean, Google Cloud DNS, Hetzner, Infomaniak, Porkbun, PowerDNS and Route53 are tested against mocks of their documented APIs but have not yet been exercised against the live services. Reports from real accounts are welcome.
+
+### Bunny DNS
+
+Account API key from the bunny.net dashboard (`Account settings` → `API`), sent in the `AccessKey` header. The zone is resolved through the API: the account zone whose domain is the longest suffix of the FQDN wins, so delegated sub-zones are supported and no SOA lookup is needed. `with_zone` selects a zone by its domain name instead. Each challenge value is stored as its own TXT record (TTL 60s), so a wildcard and an apex challenge on the same name don't interfere, and cleanup only deletes the record holding its own value.
+
+```rust,no_run
+use cheti::{BunnyConfig, BunnyProvider};
+
+let config = BunnyConfig::new(std::env::var("BUNNY_API_KEY").unwrap());
+let provider = BunnyProvider::new(config).unwrap();
+```
+
+`BunnyProvider::from_env()` reads the key from `BUNNY_API_KEY`.
 
 ### Cloudflare
 
@@ -137,6 +150,31 @@ let config = GandiConfig::new(std::env::var("GANDIV5_PERSONAL_ACCESS_TOKEN").unw
 let provider = GandiProvider::new(config).unwrap();
 ```
 
+### Google Cloud DNS
+
+JSON key of a service account with the `roles/dns.admin` role on the project that holds the zone, or a narrower custom role granting `dns.managedZones.list`, `dns.resourceRecordSets.list`, `dns.resourceRecordSets.create`, `dns.resourceRecordSets.update`, `dns.resourceRecordSets.delete`, `dns.changes.create` and `dns.changes.get`. Create the key in the [Google Cloud console](https://console.cloud.google.com/iam-admin/serviceaccounts) under `Keys` → `Add key`. The provider signs a JWT with the key and exchanges it for an OAuth2 access token, which is cached until shortly before it expires. The zone is resolved through the API (the public managed zone with the longest matching DNS name; private zones are skipped), so no SOA lookup is needed. The challenge value is merged into the existing TXT RRSet (a new one gets a TTL of 60s), and cleanup removes only its own value. Changes are applied atomically, and the provider waits for them (up to 60s) before returning; a change racing with another writer fails with a conflict error.
+
+```rust,no_run
+use cheti::{GoogleCloudDnsConfig, GoogleCloudDnsProvider};
+
+let config = GoogleCloudDnsConfig::from_service_account_file("/path/to/service-account.json")
+    .unwrap();
+let provider = GoogleCloudDnsProvider::new(config).unwrap();
+```
+
+`GoogleCloudDnsProvider::from_env()` reads the key file named by `GOOGLE_APPLICATION_CREDENTIALS`. The project defaults to the key's `project_id`; use `with_project` to manage zones of another project, and `with_managed_zone` to skip the zone lookup:
+
+```rust,no_run
+use cheti::GoogleCloudDnsConfig;
+let json = std::fs::read_to_string("/path/to/service-account.json").unwrap();
+let config = GoogleCloudDnsConfig::from_service_account_json(&json)
+    .unwrap()
+    .with_project("dns-project")
+    .unwrap()
+    .with_managed_zone("example-com")
+    .unwrap();
+```
+
 ### Hetzner
 
 API token of the Hetzner Console project that holds the zone, with read & write permission. Create it in the [Hetzner Console](https://console.hetzner.com/) under `Security` → `API Tokens`. Records are managed through the zones API of the Hetzner Cloud API; the legacy DNS Console API (`dns.hetzner.com`) is not supported, as it has been shut down. The zone is resolved through the API, so no SOA lookup is needed. A new TXT RRSet is created with a TTL of 60s; an existing one keeps its TTL. Record changes are asynchronous actions, which the provider waits for (up to 60s) before returning.
@@ -190,6 +228,23 @@ let provider = PorkbunProvider::new(config).unwrap();
 
 `PorkbunProvider::from_env()` reads the same two variables.
 
+### PowerDNS
+
+API key of a self-hosted PowerDNS Authoritative server (4.6.2 or later), as set by `api-key` in `pdns.conf` (with `api=yes` and the webserver enabled). Records are managed through the HTTP API under `/api/v1`. This is the HTTP alternative to the RFC 2136 provider below, which also works with PowerDNS when dynamic updates are enabled. Since the API key travels with every request, the base URL must use `https://` (plain `http://` is only accepted for `localhost`). The zone is resolved through the API by trying each suffix of the FQDN (longest first), so delegated sub-zones are supported and no SOA lookup is needed. Each challenge value is added to the TXT RRSet alongside the existing ones, so a wildcard and its apex can be validated at the same time; cleanup removes only its own value and deletes the RRSet once it is empty. A new RRSet gets a TTL of 60s; an existing one keeps its TTL.
+
+```rust,no_run
+use cheti::{PowerDnsConfig, PowerDnsProvider};
+
+let config = PowerDnsConfig::new(
+    "https://pdns.example.com",
+    std::env::var("POWERDNS_API_KEY").unwrap(),
+)
+.unwrap();
+let provider = PowerDnsProvider::new(config).unwrap();
+```
+
+`PowerDnsProvider::from_env()` reads `POWERDNS_API_URL`, `POWERDNS_API_KEY` and the optional `POWERDNS_SERVER_ID` (default `localhost`, also settable with `with_server_id`).
+
 ### RFC 2136 (BIND, Knot DNS, PowerDNS, ...)
 
 Sends TSIG-signed dynamic updates (RFC 2136) over TCP to the zone's primary server. Supported TSIG algorithms are `hmac-sha256` (default), `hmac-sha384` and `hmac-sha512`; `hmac-sha1` and `hmac-md5` are not. Each `present` adds a single TXT record and each `cleanup` deletes only that record, so other values on the same name (e.g. wildcard + apex issuance) are left alone.
@@ -224,6 +279,26 @@ zone "example.com" {
     };
 };
 ```
+
+### Route53
+
+AWS access key id and secret access key, plus a session token for temporary credentials (STS, assumed role). Requests are signed with AWS Signature Version 4; no AWS SDK is involved. The IAM policy needs `route53:ListHostedZonesByName`, `route53:ListResourceRecordSets`, `route53:ChangeResourceRecordSets` and `route53:GetChange`; the last three can be scoped to the hosted zone (`arn:aws:route53:::hostedzone/<id>`, and `arn:aws:route53:::change/*` for `GetChange`).
+
+The hosted zone is resolved through the API: the longest suffix of the FQDN that names a public hosted zone wins, so delegated sub-zones are supported and no SOA lookup is needed. Private hosted zones are skipped, as the CA validates against public DNS; several public zones with the same name are an error. Either case can be settled with `with_hosted_zone_id`. A wildcard and its apex share one TXT record set: `present` writes it back with every existing value plus its own, and `cleanup` removes only its own value (deleting the set when it was the last one). A new set gets a TTL of 60s; an existing one keeps its TTL. Each change is polled until Route53 reports it `INSYNC` (up to 120s) before returning.
+
+```rust,no_run
+use cheti::{Route53Config, Route53Provider};
+
+let config = Route53Config::new(
+    std::env::var("AWS_ACCESS_KEY_ID").unwrap(),
+    std::env::var("AWS_SECRET_ACCESS_KEY").unwrap(),
+)
+// Optional: skip the zone lookup (also the way to target a private zone).
+.with_hosted_zone_id("Z0123456789ABCDEFGHIJ").unwrap();
+let provider = Route53Provider::new(config).unwrap();
+```
+
+`Route53Provider::from_env()` reads `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and the optional `AWS_SESSION_TOKEN`. Other credential sources of the AWS SDKs (profiles, instance metadata) are not read; pass their values to `Route53Config` and `with_session_token`.
 
 ### Scaleway
 
