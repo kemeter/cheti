@@ -80,7 +80,7 @@ impl InfomaniakProvider {
         Ok(Self {
             config,
             http,
-            locks: KeyedMutex::new(),
+            locks: KeyedMutex::new(PROVIDER),
             zone_cache: Mutex::new(HashMap::new()),
         })
     }

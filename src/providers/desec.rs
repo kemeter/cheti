@@ -76,7 +76,7 @@ impl DesecProvider {
         Ok(Self {
             config,
             http,
-            locks: KeyedMutex::new(),
+            locks: KeyedMutex::new(PROVIDER),
         })
     }
 

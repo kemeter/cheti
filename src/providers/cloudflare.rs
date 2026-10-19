@@ -97,7 +97,7 @@ impl CloudflareProvider {
         Ok(Self {
             config,
             http,
-            locks: KeyedMutex::new(),
+            locks: KeyedMutex::new(PROVIDER),
             zone_id_cache: Mutex::new(None),
         })
     }

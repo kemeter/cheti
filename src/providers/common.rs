@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 
 use percent_encoding::{utf8_percent_encode, AsciiSet, PercentEncode, CONTROLS};
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
@@ -31,21 +31,35 @@ pub(crate) fn encode_path(segment: &str) -> PercentEncode<'_> {
 
 /// Serializes operations sharing the same key, in-process. Prevents the
 /// GET → merge → PUT race when multiple challenges target the same FQDN.
-/// Does not protect against concurrent writers in different processes.
-#[derive(Default)]
+///
+/// The lock table is shared by every instance, so two providers built from
+/// separate configs (e.g. one solver per certificate) still serialize on the
+/// same record. Each instance namespaces its keys by provider, so unrelated
+/// providers never wait on each other. Does not protect against concurrent
+/// writers in different processes.
 pub(crate) struct KeyedMutex {
-    map: StdMutex<HashMap<String, Arc<AsyncMutex<()>>>>,
+    namespace: &'static str,
+}
+
+type LockTable = StdMutex<HashMap<String, Arc<AsyncMutex<()>>>>;
+
+fn lock_table() -> &'static LockTable {
+    static TABLE: OnceLock<LockTable> = OnceLock::new();
+    TABLE.get_or_init(Default::default)
 }
 
 impl KeyedMutex {
-    pub(crate) fn new() -> Self {
-        Self::default()
+    pub(crate) fn new(namespace: &'static str) -> Self {
+        Self { namespace }
     }
 
     pub(crate) async fn lock(&self, key: &str) -> OwnedMutexGuard<()> {
         let entry = {
-            let mut map = self.map.lock().expect("KeyedMutex map poisoned");
-            map.entry(key.to_string())
+            let mut map = lock_table().lock().unwrap_or_else(|e| e.into_inner());
+            // Drop entries nobody holds or waits on, so the table does not
+            // grow with every name ever locked.
+            map.retain(|_, m| Arc::strong_count(m) > 1);
+            map.entry(format!("{}|{key}", self.namespace))
                 .or_insert_with(|| Arc::new(AsyncMutex::new(())))
                 .clone()
         };
@@ -158,6 +172,8 @@ pub(crate) async fn api_error(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
     #[test]
@@ -258,6 +274,30 @@ mod tests {
     #[test]
     fn validate_https_base_rejects_userinfo_smuggling() {
         assert!(validate_https_base("http://localhost@attacker.com", "test").is_err());
+    }
+
+    #[tokio::test]
+    async fn keyed_mutex_is_shared_between_instances() {
+        let a = KeyedMutex::new("test-shared");
+        let b = KeyedMutex::new("test-shared");
+        let _held = a.lock("zone|name").await;
+        let second = tokio::time::timeout(Duration::from_millis(50), b.lock("zone|name")).await;
+        assert!(
+            second.is_err(),
+            "a second instance must wait on the same key"
+        );
+    }
+
+    #[tokio::test]
+    async fn keyed_mutex_namespaces_do_not_contend() {
+        let a = KeyedMutex::new("test-ns-a");
+        let b = KeyedMutex::new("test-ns-b");
+        let _held = a.lock("zone|name").await;
+        let other = tokio::time::timeout(Duration::from_millis(50), b.lock("zone|name")).await;
+        assert!(
+            other.is_ok(),
+            "different namespaces must not block each other"
+        );
     }
 
     #[test]
