@@ -50,7 +50,7 @@ impl OvhConfig {
     pub fn with_api_base(mut self, api_base: impl Into<String>) -> Result<Self, DnsError> {
         let base = api_base.into();
         validate_https_base(&base, PROVIDER)?;
-        self.api_base = base;
+        self.api_base = base.trim_end_matches('/').to_string();
         Ok(self)
     }
 
@@ -417,6 +417,14 @@ mod tests {
     fn with_api_base_accepts_localhost_for_tests() {
         let cfg = OvhConfig::new("ak", "as", "ck");
         assert!(cfg.with_api_base("http://localhost:8080").is_ok());
+    }
+
+    #[test]
+    fn with_api_base_strips_trailing_slash() {
+        let cfg = OvhConfig::new("ak", "as", "ck")
+            .with_api_base("https://api.example.com/v1/")
+            .unwrap();
+        assert_eq!(cfg.api_base, "https://api.example.com/v1");
     }
 
     #[test]
