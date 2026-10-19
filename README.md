@@ -358,7 +358,7 @@ The solver doesn't care — set the profile on the order and pass it in.
 
 ## Propagation tuning
 
-The solver polls authoritative nameservers until the TXT record is visible, then asks the CA to validate. Defaults (120s timeout, 5s interval) are conservative; tune for your provider:
+The solver polls the zone's authoritative nameservers until every one of them serves the TXT record, then asks the CA to validate (if the nameservers cannot be found, it falls back to public resolvers). Defaults (120s timeout, 5s interval) are conservative; tune for your provider:
 
 ```rust,no_run
 use std::time::Duration;
