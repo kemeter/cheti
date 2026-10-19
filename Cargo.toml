@@ -17,8 +17,8 @@ testing = []
 
 [dependencies]
 async-trait = "0.1"
-thiserror = "1"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+thiserror = "2"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "query"] }
 hickory-resolver = "0.26"
 # Builds and TSIG-signs RFC 2136 UPDATE messages. `dnssec-ring` is what
 # enables TSIG; ring is already in the tree through rustls and rcgen.
@@ -31,11 +31,11 @@ secrecy = "0.10"
 url = "2"
 percent-encoding = "2"
 instant-acme = "0.8"
-sha1 = "0.10"
+sha1 = "0.11"
 hex = "0.4"
-x509-parser = "0.16"
+x509-parser = "0.18"
 # Generates the self-signed TLS-ALPN-01 challenge certificate (RFC 8737).
-rcgen = "0.13"
+rcgen = "0.14"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
