@@ -7,7 +7,7 @@ ACME DNS-01 challenge library for Rust, with pluggable DNS providers.
 ## Features
 
 - **DNS-01 challenges only** — works for wildcards and for domains behind a firewall, no HTTP-01 server needed
-- **Built-in providers**: Cloudflare, deSEC, DigitalOcean, Gandi, Google Cloud DNS, Hetzner, Infomaniak, OVH, Porkbun, PowerDNS (HTTP API), Scaleway, and RFC 2136 (TSIG-signed dynamic updates) for self-hosted servers such as BIND, Knot DNS or PowerDNS
+- **Built-in providers**: Bunny DNS, Cloudflare, deSEC, DigitalOcean, Gandi, Google Cloud DNS, Hetzner, Infomaniak, OVH, Porkbun, PowerDNS (HTTP API), Scaleway, and RFC 2136 (TSIG-signed dynamic updates) for self-hosted servers such as BIND, Knot DNS or PowerDNS
 - **Bring-your-own provider**: implement the `DnsProvider` trait for anything else
 - **Persisted ACME accounts** via `AccountStore` so you don't burn through your CA's account-creation rate limit
 - **Renewal helper** that reads a leaf certificate's expiry and tells you when to re-issue
@@ -81,7 +81,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 Each provider has the same shape: a `*Config` builder, then a `*Provider` constructed from it.
 
-DigitalOcean, Google Cloud DNS, Hetzner, Infomaniak, Porkbun and PowerDNS are tested against mocks of their documented APIs but have not yet been exercised against the live services. Reports from real accounts are welcome.
+Bunny DNS, DigitalOcean, Google Cloud DNS, Hetzner, Infomaniak, Porkbun and PowerDNS are tested against mocks of their documented APIs but have not yet been exercised against the live services. Reports from real accounts are welcome.
+
+### Bunny DNS
+
+Account API key from the bunny.net dashboard (`Account settings` → `API`), sent in the `AccessKey` header. The zone is resolved through the API: the account zone whose domain is the longest suffix of the FQDN wins, so delegated sub-zones are supported and no SOA lookup is needed. `with_zone` selects a zone by its domain name instead. Each challenge value is stored as its own TXT record (TTL 60s), so a wildcard and an apex challenge on the same name don't interfere, and cleanup only deletes the record holding its own value.
+
+```rust,no_run
+use cheti::{BunnyConfig, BunnyProvider};
+
+let config = BunnyConfig::new(std::env::var("BUNNY_API_KEY").unwrap());
+let provider = BunnyProvider::new(config).unwrap();
+```
+
+`BunnyProvider::from_env()` reads the key from `BUNNY_API_KEY`.
 
 ### Cloudflare
 
