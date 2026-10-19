@@ -18,7 +18,7 @@ testing = []
 [dependencies]
 async-trait = "0.1"
 thiserror = "2"
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "query"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "query", "form"] }
 hickory-resolver = "0.26"
 # Builds and TSIG-signs RFC 2136 UPDATE messages. `dnssec-ring` is what
 # enables TSIG; ring is already in the tree through rustls and rcgen.
@@ -36,12 +36,21 @@ hex = "0.4"
 x509-parser = "0.18"
 # Generates the self-signed TLS-ALPN-01 challenge certificate (RFC 8737).
 rcgen = "0.14"
+# RS256-signs the Google Cloud DNS service account JWT; already in the tree
+# through rustls and hickory-proto.
+ring = "0.17"
+# Decodes the PKCS#8 PEM private key of a Google service account; already in
+# the tree through rustls.
+rustls-pki-types = "1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "test-util"] }
 wiremock = "0.6"
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 time = "0.3"
+# RSA key generation (throwaway Google service account keys) is only
+# implemented by the aws-lc-rs backend.
+rcgen = { version = "0.14", features = ["aws_lc_rs"] }
 
 [lints.rust]
 unsafe_code = "forbid"

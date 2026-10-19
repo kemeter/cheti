@@ -4,6 +4,7 @@ pub mod cloudflare;
 pub mod desec;
 pub mod digitalocean;
 pub mod gandi;
+pub mod google_cloud_dns;
 pub mod hetzner;
 pub mod infomaniak;
 pub mod ovh;

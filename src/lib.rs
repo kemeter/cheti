@@ -23,6 +23,7 @@ pub use providers::cloudflare::{CloudflareConfig, CloudflareProvider};
 pub use providers::desec::{DesecConfig, DesecProvider};
 pub use providers::digitalocean::{DigitalOceanConfig, DigitalOceanProvider};
 pub use providers::gandi::{GandiConfig, GandiProvider};
+pub use providers::google_cloud_dns::{GoogleCloudDnsConfig, GoogleCloudDnsProvider};
 pub use providers::hetzner::{HetznerConfig, HetznerProvider};
 pub use providers::infomaniak::{InfomaniakConfig, InfomaniakProvider};
 pub use providers::ovh::{OvhConfig, OvhProvider};
