@@ -542,6 +542,8 @@ async fn throttling_surfaces_as_rate_limit() {
     Mock::given(method("POST"))
         .and(path(CHANGE_PATH))
         .respond_with(error_response(400, "Throttling", "Rate exceeded"))
+        // Retried with backoff before the last throttling error surfaces.
+        .expect(3)
         .mount(&server)
         .await;
 
@@ -552,6 +554,30 @@ async fn throttling_surfaces_as_rate_limit() {
     assert!(msg.contains("route53"), "{msg}");
     assert!(msg.contains("rate limited"), "{msg}");
     assert!(msg.contains("Throttling"), "{msg}");
+}
+
+#[tokio::test]
+async fn throttled_change_is_resent() {
+    let server = MockServer::start().await;
+
+    mount_rrset(empty_rrset_list()).mount(&server).await;
+
+    Mock::given(method("POST"))
+        .and(path(CHANGE_PATH))
+        .respond_with(error_response(400, "PriorRequestNotComplete", "Busy"))
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(CHANGE_PATH))
+        .respond_with(change_info("C1", "INSYNC"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = build_provider(&server);
+    provider.present(FQDN, VALUE).await.unwrap();
 }
 
 #[tokio::test]

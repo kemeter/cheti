@@ -13,7 +13,7 @@ const MAX_ERROR_BODY: usize = 512;
 
 /// Throttled (429) and unavailable (503) responses are retried, up to this
 /// many attempts in total.
-const MAX_ATTEMPTS: u32 = 3;
+pub(crate) const MAX_ATTEMPTS: u32 = 3;
 /// Longest `Retry-After` honoured. A server asking for more is not retried:
 /// the response is returned as is, so its error surfaces with the delay.
 const MAX_RETRY_WAIT: Duration = Duration::from_secs(10);
@@ -88,8 +88,14 @@ fn retry_delay(
     match retry_after {
         Some(wait) if wait > MAX_RETRY_WAIT => None,
         Some(wait) => Some(wait),
-        None => Some(RETRY_BACKOFF * 2u32.pow(attempt - 1)),
+        None => Some(retry_backoff(attempt)),
     }
+}
+
+/// Wait before retrying after `attempt` (1-based) failed, when the server
+/// gives no delay of its own.
+pub(crate) fn retry_backoff(attempt: u32) -> Duration {
+    RETRY_BACKOFF * 2u32.pow(attempt - 1)
 }
 
 const PATH_SEGMENT: &AsciiSet = &CONTROLS
