@@ -77,18 +77,14 @@ impl AccountStore for FileAccountStore {
             })?;
         }
 
-        let tmp = self.path.with_extension("tmp");
-        std::fs::write(&tmp, &bytes)
-            .map_err(|e| DnsError::Storage(format!("write {}: {e}", tmp.display())))?;
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))
-                .map_err(|e| DnsError::Storage(format!("chmod {}: {e}", tmp.display())))?;
+        let tmp = unique_temp_path(&self.path);
+        if let Err(e) = write_private(&tmp, &bytes) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(DnsError::Storage(format!("write {}: {e}", tmp.display())));
         }
 
         std::fs::rename(&tmp, &self.path).map_err(|e| {
+            let _ = std::fs::remove_file(&tmp);
             DnsError::Storage(format!(
                 "rename {} -> {}: {e}",
                 tmp.display(),
@@ -97,6 +93,36 @@ impl AccountStore for FileAccountStore {
         })?;
         Ok(())
     }
+}
+
+/// Sibling temp path, unique per process and per call, so concurrent saves
+/// never share (or truncate) each other's temp file.
+fn unique_temp_path(path: &Path) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".{}.{n}.tmp", std::process::id()));
+    path.with_file_name(name)
+}
+
+/// Creates `path` (failing if it already exists, so a planted file or symlink
+/// is never followed), already restricted to `0600` on Unix so the key is not
+/// readable even briefly, and flushes it to disk before it is renamed.
+fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
 }
 
 #[cfg(test)]
@@ -163,5 +189,43 @@ mod tests {
         let store = FileAccountStore::new("/proc/1/mem");
         let result = store.load();
         assert!(matches!(result, Err(_) | Ok(None)));
+    }
+
+    #[test]
+    fn unique_temp_paths_differ_between_calls() {
+        let path = Path::new("/var/lib/cheti/account.json");
+        let a = unique_temp_path(path);
+        let b = unique_temp_path(path);
+        assert_ne!(a, b);
+        assert_eq!(a.parent(), path.parent());
+    }
+
+    #[test]
+    fn write_private_refuses_an_existing_file() {
+        let path = std::env::temp_dir().join(format!(
+            "cheti-test-write-private-exists-{}",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"planted").unwrap();
+        let err = write_private(&path, b"secret").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read(&path).unwrap(), b"planted");
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_private_creates_owner_only_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = std::env::temp_dir().join(format!(
+            "cheti-test-write-private-mode-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        write_private(&path, b"secret").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        std::fs::remove_file(&path).unwrap();
     }
 }
