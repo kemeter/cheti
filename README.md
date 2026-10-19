@@ -7,7 +7,7 @@ ACME DNS-01 challenge library for Rust, with pluggable DNS providers.
 ## Features
 
 - **DNS-01 challenges only** — works for wildcards and for domains behind a firewall, no HTTP-01 server needed
-- **Built-in providers**: Cloudflare, deSEC, DigitalOcean, Gandi, Hetzner, Infomaniak, OVH, Porkbun, PowerDNS (HTTP API), Scaleway, and RFC 2136 (TSIG-signed dynamic updates) for self-hosted servers such as BIND, Knot DNS or PowerDNS
+- **Built-in providers**: Cloudflare, deSEC, DigitalOcean, Gandi, Google Cloud DNS, Hetzner, Infomaniak, OVH, Porkbun, PowerDNS (HTTP API), Scaleway, and RFC 2136 (TSIG-signed dynamic updates) for self-hosted servers such as BIND, Knot DNS or PowerDNS
 - **Bring-your-own provider**: implement the `DnsProvider` trait for anything else
 - **Persisted ACME accounts** via `AccountStore` so you don't burn through your CA's account-creation rate limit
 - **Renewal helper** that reads a leaf certificate's expiry and tells you when to re-issue
@@ -81,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 Each provider has the same shape: a `*Config` builder, then a `*Provider` constructed from it.
 
-DigitalOcean, Hetzner, Infomaniak, Porkbun and PowerDNS are tested against mocks of their documented APIs but have not yet been exercised against the live services. Reports from real accounts are welcome.
+DigitalOcean, Google Cloud DNS, Hetzner, Infomaniak, Porkbun and PowerDNS are tested against mocks of their documented APIs but have not yet been exercised against the live services. Reports from real accounts are welcome.
 
 ### Cloudflare
 
@@ -135,6 +135,31 @@ use cheti::{GandiConfig, GandiProvider};
 
 let config = GandiConfig::new(std::env::var("GANDIV5_PERSONAL_ACCESS_TOKEN").unwrap());
 let provider = GandiProvider::new(config).unwrap();
+```
+
+### Google Cloud DNS
+
+JSON key of a service account with the `roles/dns.admin` role on the project that holds the zone, or a narrower custom role granting `dns.managedZones.list`, `dns.resourceRecordSets.list`, `dns.resourceRecordSets.create`, `dns.resourceRecordSets.update`, `dns.resourceRecordSets.delete`, `dns.changes.create` and `dns.changes.get`. Create the key in the [Google Cloud console](https://console.cloud.google.com/iam-admin/serviceaccounts) under `Keys` → `Add key`. The provider signs a JWT with the key and exchanges it for an OAuth2 access token, which is cached until shortly before it expires. The zone is resolved through the API (the public managed zone with the longest matching DNS name; private zones are skipped), so no SOA lookup is needed. The challenge value is merged into the existing TXT RRSet (a new one gets a TTL of 60s), and cleanup removes only its own value. Changes are applied atomically, and the provider waits for them (up to 60s) before returning; a change racing with another writer fails with a conflict error.
+
+```rust,no_run
+use cheti::{GoogleCloudDnsConfig, GoogleCloudDnsProvider};
+
+let config = GoogleCloudDnsConfig::from_service_account_file("/path/to/service-account.json")
+    .unwrap();
+let provider = GoogleCloudDnsProvider::new(config).unwrap();
+```
+
+`GoogleCloudDnsProvider::from_env()` reads the key file named by `GOOGLE_APPLICATION_CREDENTIALS`. The project defaults to the key's `project_id`; use `with_project` to manage zones of another project, and `with_managed_zone` to skip the zone lookup:
+
+```rust,no_run
+use cheti::GoogleCloudDnsConfig;
+let json = std::fs::read_to_string("/path/to/service-account.json").unwrap();
+let config = GoogleCloudDnsConfig::from_service_account_json(&json)
+    .unwrap()
+    .with_project("dns-project")
+    .unwrap()
+    .with_managed_zone("example-com")
+    .unwrap();
 ```
 
 ### Hetzner
