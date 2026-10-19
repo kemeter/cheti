@@ -5,6 +5,7 @@
 #![doc = include_str!("../README.md")]
 
 pub mod account_store;
+mod cleanup;
 pub mod dns;
 pub mod error;
 pub mod provider;
