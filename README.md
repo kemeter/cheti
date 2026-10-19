@@ -7,7 +7,7 @@ ACME DNS-01 challenge library for Rust, with pluggable DNS providers.
 ## Features
 
 - **DNS-01 challenges only** — works for wildcards and for domains behind a firewall, no HTTP-01 server needed
-- **Built-in providers**: Cloudflare, deSEC, DigitalOcean, Gandi, Hetzner, Infomaniak, OVH, Porkbun, Scaleway, and RFC 2136 (TSIG-signed dynamic updates) for self-hosted servers such as BIND, Knot DNS or PowerDNS
+- **Built-in providers**: Cloudflare, deSEC, DigitalOcean, Gandi, Hetzner, Infomaniak, OVH, Porkbun, PowerDNS (HTTP API), Scaleway, and RFC 2136 (TSIG-signed dynamic updates) for self-hosted servers such as BIND, Knot DNS or PowerDNS
 - **Bring-your-own provider**: implement the `DnsProvider` trait for anything else
 - **Persisted ACME accounts** via `AccountStore` so you don't burn through your CA's account-creation rate limit
 - **Renewal helper** that reads a leaf certificate's expiry and tells you when to re-issue
@@ -81,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 Each provider has the same shape: a `*Config` builder, then a `*Provider` constructed from it.
 
-DigitalOcean, Hetzner, Infomaniak and Porkbun are tested against mocks of their documented APIs but have not yet been exercised against the live services. Reports from real accounts are welcome.
+DigitalOcean, Hetzner, Infomaniak, Porkbun and PowerDNS are tested against mocks of their documented APIs but have not yet been exercised against the live services. Reports from real accounts are welcome.
 
 ### Cloudflare
 
@@ -189,6 +189,23 @@ let provider = PorkbunProvider::new(config).unwrap();
 ```
 
 `PorkbunProvider::from_env()` reads the same two variables.
+
+### PowerDNS
+
+API key of a self-hosted PowerDNS Authoritative server (4.6.2 or later), as set by `api-key` in `pdns.conf` (with `api=yes` and the webserver enabled). Records are managed through the HTTP API under `/api/v1`. This is the HTTP alternative to the RFC 2136 provider below, which also works with PowerDNS when dynamic updates are enabled. Since the API key travels with every request, the base URL must use `https://` (plain `http://` is only accepted for `localhost`). The zone is resolved through the API by trying each suffix of the FQDN (longest first), so delegated sub-zones are supported and no SOA lookup is needed. Each challenge value is added to the TXT RRSet alongside the existing ones, so a wildcard and its apex can be validated at the same time; cleanup removes only its own value and deletes the RRSet once it is empty. A new RRSet gets a TTL of 60s; an existing one keeps its TTL.
+
+```rust,no_run
+use cheti::{PowerDnsConfig, PowerDnsProvider};
+
+let config = PowerDnsConfig::new(
+    "https://pdns.example.com",
+    std::env::var("POWERDNS_API_KEY").unwrap(),
+)
+.unwrap();
+let provider = PowerDnsProvider::new(config).unwrap();
+```
+
+`PowerDnsProvider::from_env()` reads `POWERDNS_API_URL`, `POWERDNS_API_KEY` and the optional `POWERDNS_SERVER_ID` (default `localhost`, also settable with `with_server_id`).
 
 ### RFC 2136 (BIND, Knot DNS, PowerDNS, ...)
 
