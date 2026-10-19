@@ -19,6 +19,7 @@ pub use account_store::{AccountStore, FileAccountStore};
 pub use dns::{find_zone, wait_for_propagation, DEFAULT_RESOLVERS};
 pub use error::DnsError;
 pub use provider::{DnsProvider, PropagationTiming};
+pub use providers::bunny::{BunnyConfig, BunnyProvider};
 pub use providers::cloudflare::{CloudflareConfig, CloudflareProvider};
 pub use providers::desec::{DesecConfig, DesecProvider};
 pub use providers::digitalocean::{DigitalOceanConfig, DigitalOceanProvider};

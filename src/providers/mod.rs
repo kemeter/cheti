@@ -1,5 +1,6 @@
 mod common;
 
+pub mod bunny;
 pub mod cloudflare;
 pub mod desec;
 pub mod digitalocean;
