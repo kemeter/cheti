@@ -1,9 +1,11 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use instant_acme::{
     AuthorizationStatus, ChallengeType, Identifier, Order, OrderStatus, RetryPolicy,
 };
 
+use crate::cleanup::CleanupGuard;
 use crate::dns::wait_for_propagation;
 use crate::error::DnsError;
 use crate::provider::{DnsProvider, PropagationTiming};
@@ -42,6 +44,7 @@ pub(crate) trait ChallengeDriver {
     async fn finalize(&mut self) -> Result<(String, String), DnsError>;
 }
 
+#[derive(Clone)]
 struct PlacedRecord {
     fqdn: String,
     value: String,
@@ -50,17 +53,17 @@ struct PlacedRecord {
 /// End-to-end DNS-01 orchestrator. Wraps a `DnsProvider` and drives an
 /// `instant_acme::Order` from `Pending` to a usable certificate, calling
 /// `present` / `cleanup` on the provider as needed.
-pub struct Dns01Solver<P: DnsProvider> {
-    provider: P,
+pub struct Dns01Solver<P: DnsProvider + 'static> {
+    provider: Arc<P>,
     fallback_resolvers: Vec<String>,
     timing: Option<PropagationTiming>,
     skip_propagation: Option<Duration>,
 }
 
-impl<P: DnsProvider> Dns01Solver<P> {
+impl<P: DnsProvider + 'static> Dns01Solver<P> {
     pub fn new(provider: P) -> Self {
         Self {
-            provider,
+            provider: Arc::new(provider),
             fallback_resolvers: crate::dns::DEFAULT_RESOLVERS
                 .iter()
                 .map(|s| (*s).to_string())
@@ -98,8 +101,14 @@ impl<P: DnsProvider> Dns01Solver<P> {
     }
 
     /// Drive the order from Pending to a certificate. Returns
-    /// `(certificate_chain_pem, private_key_pem)`. Cleanup of placed TXT
-    /// records is best-effort and runs even on error paths.
+    /// `(certificate_chain_pem, private_key_pem)`.
+    ///
+    /// Placed TXT records are removed before returning, on success and on
+    /// error. If this future is dropped before completing (a caller-side
+    /// timeout, a `select!`, a shutdown), the records still in place are
+    /// removed from a task spawned on the current Tokio runtime. Cleanup is
+    /// best-effort either way: a failing `cleanup` is not reported, and the
+    /// spawned task does not run if the runtime shuts down first.
     pub async fn solve_and_finalize(&self, order: Order) -> Result<(String, String), DnsError> {
         let driver = InstantAcmeDriver::new(order);
         self.solve_with_driver(driver).await
@@ -109,27 +118,23 @@ impl<P: DnsProvider> Dns01Solver<P> {
         &self,
         mut driver: D,
     ) -> Result<(String, String), DnsError> {
-        let placed = match self.present_all(&mut driver).await {
-            Ok(p) => p,
-            Err(e) => return Err(e),
+        let mut placed = self.cleanup_guard();
+        let outcome = match self.present_then_ready(&mut driver, &mut placed).await {
+            Ok(()) => driver.finalize().await,
+            Err(e) => Err(e),
         };
-        let outcome = driver.finalize().await;
-        self.cleanup_all(&placed).await;
+        placed.run().await;
         outcome
     }
 
-    async fn present_all<D: ChallengeDriver>(
-        &self,
-        driver: &mut D,
-    ) -> Result<Vec<PlacedRecord>, DnsError> {
-        let mut placed: Vec<PlacedRecord> = Vec::new();
-        match self.present_then_ready(driver, &mut placed).await {
-            Ok(()) => Ok(placed),
-            Err(e) => {
-                self.cleanup_all(&placed).await;
-                Err(e)
+    fn cleanup_guard(&self) -> CleanupGuard<PlacedRecord> {
+        let provider = Arc::clone(&self.provider);
+        CleanupGuard::new(move |record: PlacedRecord| {
+            let provider = Arc::clone(&provider);
+            async move {
+                let _ = provider.cleanup(&record.fqdn, &record.value).await;
             }
-        }
+        })
     }
 
     /// Places every record first, then waits for propagation once, and only
@@ -138,7 +143,7 @@ impl<P: DnsProvider> Dns01Solver<P> {
     async fn present_then_ready<D: ChallengeDriver>(
         &self,
         driver: &mut D,
-        placed: &mut Vec<PlacedRecord>,
+        placed: &mut CleanupGuard<PlacedRecord>,
     ) -> Result<(), DnsError> {
         let mut tokens: Vec<usize> = Vec::new();
 
@@ -163,7 +168,7 @@ impl<P: DnsProvider> Dns01Solver<P> {
                 let timing = self.timing.unwrap_or_else(|| self.provider.timing());
                 let resolvers: Vec<&str> =
                     self.fallback_resolvers.iter().map(String::as_str).collect();
-                for record in placed.iter() {
+                for record in placed.pending() {
                     wait_for_propagation(&record.fqdn, &record.value, &resolvers, timing).await?;
                 }
             }
@@ -173,12 +178,6 @@ impl<P: DnsProvider> Dns01Solver<P> {
             driver.set_ready(token).await?;
         }
         Ok(())
-    }
-
-    async fn cleanup_all(&self, placed: &[PlacedRecord]) {
-        for record in placed {
-            let _ = self.provider.cleanup(&record.fqdn, &record.value).await;
-        }
     }
 }
 
@@ -615,6 +614,52 @@ mod tests {
                 "ready 0",
                 "ready 1",
             ]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn records_are_cleaned_up_when_the_solve_is_cancelled() {
+        use std::sync::Arc;
+
+        struct ArcProvider(Arc<FakeProvider>);
+        #[async_trait::async_trait]
+        impl DnsProvider for ArcProvider {
+            async fn present(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
+                self.0.present(fqdn, value).await
+            }
+            async fn cleanup(&self, fqdn: &str, value: &str) -> Result<(), DnsError> {
+                self.0.cleanup(fqdn, value).await
+            }
+        }
+
+        let provider = Arc::new(FakeProvider::new());
+        let driver = FakeDriver::new(vec![
+            Scripted::Pending {
+                domain: "a.example".into(),
+            },
+            Scripted::Pending {
+                domain: "b.example".into(),
+            },
+        ]);
+        // The propagation delay outlasts the caller's timeout, so the solve
+        // is dropped after both records are placed and before any cleanup.
+        let solver = Dns01Solver::new(ArcProvider(provider.clone()))
+            .skip_propagation_check(Duration::from_secs(600));
+        let cancelled =
+            tokio::time::timeout(Duration::from_secs(1), solver.solve_with_driver(driver)).await;
+        assert!(cancelled.is_err(), "the solve should have been cancelled");
+
+        // Let the cleanup task spawned on drop run; bounded so a missing
+        // cleanup fails the assertion below instead of hanging.
+        for _ in 0..100 {
+            if provider.cleaned_fqdns().len() >= 2 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            provider.cleaned_fqdns(),
+            vec!["_acme-challenge.a.example", "_acme-challenge.b.example"]
         );
     }
 
