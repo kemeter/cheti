@@ -74,7 +74,7 @@ impl HetznerProvider {
         Ok(Self {
             config,
             http,
-            locks: KeyedMutex::new(),
+            locks: KeyedMutex::new(PROVIDER),
         })
     }
 

@@ -5,14 +5,19 @@ use hickory_resolver::TokioResolver;
 
 use crate::error::DnsError;
 
-fn shared_resolver() -> &'static TokioResolver {
+/// Only a successfully built resolver is cached: a missing or unreadable
+/// system DNS configuration surfaces as an error (not a panic) and is retried
+/// on the next call.
+fn shared_resolver() -> Result<&'static TokioResolver, DnsError> {
     static RESOLVER: OnceLock<TokioResolver> = OnceLock::new();
-    RESOLVER.get_or_init(|| {
-        TokioResolver::builder_tokio()
-            .expect("failed to read system DNS configuration")
-            .build()
-            .expect("failed to build system DNS resolver")
-    })
+    if let Some(resolver) = RESOLVER.get() {
+        return Ok(resolver);
+    }
+    let resolver = TokioResolver::builder_tokio()
+        .map_err(|e| DnsError::Resolver(format!("read system DNS configuration: {e}")))?
+        .build()
+        .map_err(|e| DnsError::Resolver(format!("build system DNS resolver: {e}")))?;
+    Ok(RESOLVER.get_or_init(|| resolver))
 }
 
 /// Resolve the authoritative zone for a FQDN by walking up labels until a SOA
@@ -24,7 +29,7 @@ fn shared_resolver() -> &'static TokioResolver {
 /// Note: the SOA lookup goes through the default system resolvers. Results are
 /// not DNSSEC-validated; treat this as a best-effort lookup.
 pub async fn find_zone(fqdn: &str) -> Result<String, DnsError> {
-    let resolver = shared_resolver();
+    let resolver = shared_resolver()?;
     let trimmed = fqdn.trim_end_matches('.');
     let mut candidate = trimmed.to_string();
 

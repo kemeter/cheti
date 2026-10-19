@@ -69,7 +69,7 @@ impl ScalewayProvider {
         Ok(Self {
             config,
             http,
-            locks: KeyedMutex::new(),
+            locks: KeyedMutex::new(PROVIDER),
         })
     }
 

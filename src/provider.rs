@@ -22,7 +22,7 @@ impl Default for PropagationTiming {
 /// A DNS provider that can place and remove the TXT records required by an
 /// ACME DNS-01 challenge.
 ///
-/// This trait is object-safe (via [`async_trait`]), so it can be used as
+/// This trait is object-safe (via [`async_trait`](macro@async_trait)), so it can be used as
 /// `Box<dyn DnsProvider>` when the concrete provider is chosen at runtime.
 #[async_trait]
 pub trait DnsProvider: Send + Sync {
