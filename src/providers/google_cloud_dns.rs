@@ -320,9 +320,19 @@ impl GoogleCloudDnsProvider {
             .await?;
         let status = response.status();
         if !status.is_success() {
+            self.forget_token_on_unauthorized(status).await;
             return Err(check_error("GET", path.to_string(), status, response).await);
         }
         Ok(response)
+    }
+
+    /// A 401 means the cached token was revoked or expired early: drop it so
+    /// the next operation exchanges a fresh one instead of failing until the
+    /// cached expiry.
+    async fn forget_token_on_unauthorized(&self, status: reqwest::StatusCode) {
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            *self.token.lock().await = None;
+        }
     }
 
     /// Finds the managed zone owning `fqdn`: the public zone with the longest
@@ -409,6 +419,7 @@ impl GoogleCloudDnsProvider {
 
         let status = response.status();
         if !status.is_success() {
+            self.forget_token_on_unauthorized(status).await;
             return Err(check_error("POST", path, status, response).await);
         }
 

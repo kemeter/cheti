@@ -819,3 +819,36 @@ async fn from_service_account_file_reads_key() {
     let provider = GoogleCloudDnsProvider::new(config).unwrap();
     provider.cleanup(FQDN, VALUE).await.unwrap();
 }
+
+#[tokio::test]
+async fn unauthorized_drops_the_cached_token() {
+    let server = MockServer::start().await;
+
+    // One exchange before the 401, one after it.
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(token_response())
+        .expect(2)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path(RRSETS_PATH))
+        .respond_with(ResponseTemplate::new(401).set_body_json(json!({
+            "error": { "code": 401, "message": "Request had invalid authentication credentials." }
+        })))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(RRSETS_PATH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "rrsets": [] })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = build_provider(&server);
+    let first = provider.cleanup(FQDN, VALUE).await;
+    assert!(matches!(first, Err(DnsError::Auth(_))), "got {first:?}");
+    provider.cleanup(FQDN, VALUE).await.unwrap();
+}
