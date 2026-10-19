@@ -7,7 +7,7 @@ ACME DNS-01 challenge library for Rust, with pluggable DNS providers.
 ## Features
 
 - **DNS-01 challenges only** — works for wildcards and for domains behind a firewall, no HTTP-01 server needed
-- **Built-in providers**: Bunny DNS, Cloudflare, deSEC, DigitalOcean, Gandi, Google Cloud DNS, Hetzner, Infomaniak, OVH, Porkbun, PowerDNS (HTTP API), Scaleway, and RFC 2136 (TSIG-signed dynamic updates) for self-hosted servers such as BIND, Knot DNS or PowerDNS
+- **Built-in providers**: Bunny DNS, Cloudflare, deSEC, DigitalOcean, Gandi, Google Cloud DNS, Hetzner, Infomaniak, OVH, Porkbun, PowerDNS (HTTP API), Route53, Scaleway, and RFC 2136 (TSIG-signed dynamic updates) for self-hosted servers such as BIND, Knot DNS or PowerDNS
 - **Bring-your-own provider**: implement the `DnsProvider` trait for anything else
 - **Persisted ACME accounts** via `AccountStore` so you don't burn through your CA's account-creation rate limit
 - **Renewal helper** that reads a leaf certificate's expiry and tells you when to re-issue
@@ -81,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 Each provider has the same shape: a `*Config` builder, then a `*Provider` constructed from it.
 
-Bunny DNS, DigitalOcean, Google Cloud DNS, Hetzner, Infomaniak, Porkbun and PowerDNS are tested against mocks of their documented APIs but have not yet been exercised against the live services. Reports from real accounts are welcome.
+Bunny DNS, DigitalOcean, Google Cloud DNS, Hetzner, Infomaniak, Porkbun, PowerDNS and Route53 are tested against mocks of their documented APIs but have not yet been exercised against the live services. Reports from real accounts are welcome.
 
 ### Bunny DNS
 
@@ -279,6 +279,26 @@ zone "example.com" {
     };
 };
 ```
+
+### Route53
+
+AWS access key id and secret access key, plus a session token for temporary credentials (STS, assumed role). Requests are signed with AWS Signature Version 4; no AWS SDK is involved. The IAM policy needs `route53:ListHostedZonesByName`, `route53:ListResourceRecordSets`, `route53:ChangeResourceRecordSets` and `route53:GetChange`; the last three can be scoped to the hosted zone (`arn:aws:route53:::hostedzone/<id>`, and `arn:aws:route53:::change/*` for `GetChange`).
+
+The hosted zone is resolved through the API: the longest suffix of the FQDN that names a public hosted zone wins, so delegated sub-zones are supported and no SOA lookup is needed. Private hosted zones are skipped, as the CA validates against public DNS; several public zones with the same name are an error. Either case can be settled with `with_hosted_zone_id`. A wildcard and its apex share one TXT record set: `present` writes it back with every existing value plus its own, and `cleanup` removes only its own value (deleting the set when it was the last one). A new set gets a TTL of 60s; an existing one keeps its TTL. Each change is polled until Route53 reports it `INSYNC` (up to 120s) before returning.
+
+```rust,no_run
+use cheti::{Route53Config, Route53Provider};
+
+let config = Route53Config::new(
+    std::env::var("AWS_ACCESS_KEY_ID").unwrap(),
+    std::env::var("AWS_SECRET_ACCESS_KEY").unwrap(),
+)
+// Optional: skip the zone lookup (also the way to target a private zone).
+.with_hosted_zone_id("Z0123456789ABCDEFGHIJ").unwrap();
+let provider = Route53Provider::new(config).unwrap();
+```
+
+`Route53Provider::from_env()` reads `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and the optional `AWS_SESSION_TOKEN`. Other credential sources of the AWS SDKs (profiles, instance metadata) are not read; pass their values to `Route53Config` and `with_session_token`.
 
 ### Scaleway
 
