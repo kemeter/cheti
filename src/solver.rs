@@ -123,53 +123,56 @@ impl<P: DnsProvider> Dns01Solver<P> {
         driver: &mut D,
     ) -> Result<Vec<PlacedRecord>, DnsError> {
         let mut placed: Vec<PlacedRecord> = Vec::new();
+        match self.present_then_ready(driver, &mut placed).await {
+            Ok(()) => Ok(placed),
+            Err(e) => {
+                self.cleanup_all(&placed).await;
+                Err(e)
+            }
+        }
+    }
+
+    /// Places every record first, then waits for propagation once, and only
+    /// then tells ACME to validate: no challenge is set ready before its
+    /// record is visible, and the wait is not paid once per challenge.
+    async fn present_then_ready<D: ChallengeDriver>(
+        &self,
+        driver: &mut D,
+        placed: &mut Vec<PlacedRecord>,
+    ) -> Result<(), DnsError> {
+        let mut tokens: Vec<usize> = Vec::new();
 
         while let Some(result) = driver.next_dns01().await {
-            let challenge = match result {
-                Ok(c) => c,
-                Err(e) => {
-                    self.cleanup_all(&placed).await;
-                    return Err(e);
-                }
-            };
-
-            if let Err(e) = self
-                .provider
-                .present(&challenge.fqdn, &challenge.dns_value)
-                .await
-            {
-                self.cleanup_all(&placed).await;
-                return Err(e);
-            }
+            let challenge = result?;
+            // Recorded before `present`: a provider can create the record and
+            // still fail afterwards (timeout, follow-up call), and cleanup is
+            // idempotent, so a record that was never written costs nothing.
             placed.push(PlacedRecord {
                 fqdn: challenge.fqdn.clone(),
                 value: challenge.dns_value.clone(),
             });
+            self.provider
+                .present(&challenge.fqdn, &challenge.dns_value)
+                .await?;
+            tokens.push(challenge.token);
+        }
 
-            if self.skip_propagation.is_none() {
+        match self.skip_propagation {
+            Some(delay) => tokio::time::sleep(delay).await,
+            None => {
                 let timing = self.timing.unwrap_or_else(|| self.provider.timing());
                 let resolvers: Vec<&str> =
                     self.fallback_resolvers.iter().map(String::as_str).collect();
-                if let Err(e) =
-                    wait_for_propagation(&challenge.fqdn, &challenge.dns_value, &resolvers, timing)
-                        .await
-                {
-                    self.cleanup_all(&placed).await;
-                    return Err(e);
+                for record in placed.iter() {
+                    wait_for_propagation(&record.fqdn, &record.value, &resolvers, timing).await?;
                 }
             }
-
-            if let Err(e) = driver.set_ready(challenge.token).await {
-                self.cleanup_all(&placed).await;
-                return Err(e);
-            }
         }
 
-        if let Some(delay) = self.skip_propagation {
-            tokio::time::sleep(delay).await;
+        for token in tokens {
+            driver.set_ready(token).await?;
         }
-
-        Ok(placed)
+        Ok(())
     }
 
     async fn cleanup_all(&self, placed: &[PlacedRecord]) {
@@ -547,8 +550,113 @@ mod tests {
         );
         assert_eq!(
             provider.cleaned_fqdns(),
-            vec!["_acme-challenge.a.example"],
-            "only the successfully-placed record must be cleaned"
+            vec!["_acme-challenge.a.example", "_acme-challenge.b.example"],
+            "a failed present may have written its record, so it is cleaned too"
+        );
+    }
+
+    #[tokio::test]
+    async fn every_record_is_placed_before_any_challenge_is_set_ready() {
+        use std::sync::Arc;
+
+        // Records the interleaving of provider and driver calls.
+        let events = Arc::new(Mutex::new(Vec::<String>::new()));
+
+        struct RecordingProvider(Arc<Mutex<Vec<String>>>);
+        #[async_trait::async_trait]
+        impl DnsProvider for RecordingProvider {
+            async fn present(&self, fqdn: &str, _value: &str) -> Result<(), DnsError> {
+                self.0.lock().unwrap().push(format!("present {fqdn}"));
+                Ok(())
+            }
+            async fn cleanup(&self, _fqdn: &str, _value: &str) -> Result<(), DnsError> {
+                Ok(())
+            }
+        }
+
+        struct RecordingDriver {
+            inner: FakeDriver,
+            events: Arc<Mutex<Vec<String>>>,
+        }
+        impl ChallengeDriver for RecordingDriver {
+            async fn next_dns01(&mut self) -> Option<Result<Dns01Challenge, DnsError>> {
+                self.inner.next_dns01().await
+            }
+            async fn set_ready(&mut self, token: usize) -> Result<(), DnsError> {
+                self.events.lock().unwrap().push(format!("ready {token}"));
+                self.inner.set_ready(token).await
+            }
+            async fn finalize(&mut self) -> Result<(String, String), DnsError> {
+                self.inner.finalize().await
+            }
+        }
+
+        let driver = RecordingDriver {
+            inner: FakeDriver::new(vec![
+                Scripted::Pending {
+                    domain: "a.example".into(),
+                },
+                Scripted::Pending {
+                    domain: "b.example".into(),
+                },
+            ]),
+            events: events.clone(),
+        };
+
+        let solver = Dns01Solver::new(RecordingProvider(events.clone()))
+            .skip_propagation_check(Duration::ZERO);
+        solver.solve_with_driver(driver).await.unwrap();
+
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec![
+                "present _acme-challenge.a.example",
+                "present _acme-challenge.b.example",
+                "ready 0",
+                "ready 1",
+            ]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn skip_propagation_delay_elapses_before_set_ready() {
+        use std::sync::Arc;
+
+        let ready_at = Arc::new(Mutex::new(None));
+
+        struct TimingDriver {
+            inner: FakeDriver,
+            ready_at: Arc<Mutex<Option<tokio::time::Instant>>>,
+        }
+        impl ChallengeDriver for TimingDriver {
+            async fn next_dns01(&mut self) -> Option<Result<Dns01Challenge, DnsError>> {
+                self.inner.next_dns01().await
+            }
+            async fn set_ready(&mut self, token: usize) -> Result<(), DnsError> {
+                *self.ready_at.lock().unwrap() = Some(tokio::time::Instant::now());
+                self.inner.set_ready(token).await
+            }
+            async fn finalize(&mut self) -> Result<(String, String), DnsError> {
+                self.inner.finalize().await
+            }
+        }
+
+        let driver = TimingDriver {
+            inner: FakeDriver::new(vec![Scripted::Pending {
+                domain: "a.example".into(),
+            }]),
+            ready_at: ready_at.clone(),
+        };
+
+        let start = tokio::time::Instant::now();
+        let solver =
+            Dns01Solver::new(FakeProvider::new()).skip_propagation_check(Duration::from_secs(30));
+        solver.solve_with_driver(driver).await.unwrap();
+
+        let ready_at = ready_at.lock().unwrap().expect("set_ready was called");
+        assert!(
+            ready_at - start >= Duration::from_secs(30),
+            "set_ready ran before the propagation delay elapsed"
         );
     }
 
