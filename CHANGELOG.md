@@ -6,6 +6,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-20
+
 First release.
 
 ### Added
@@ -27,3 +29,6 @@ First release.
   certificate's validity.
 - `testing` feature exposing `MockDnsProvider` and `MockChallengeResponder`.
 - Minimum supported Rust version: 1.89.
+
+[Unreleased]: https://github.com/kemeter/cheti/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/kemeter/cheti/releases/tag/v0.1.0
