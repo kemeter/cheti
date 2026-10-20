@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use std::collections::HashMap;
 use std::env;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -10,8 +11,8 @@ use crate::dns::find_zone;
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
-    api_error, encode_path, validate_acme_value, validate_fqdn, validate_https_base, validate_zone,
-    KeyedMutex, SendRetrying,
+    api_error, encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
+    validate_zone, KeyedMutex, SendRetrying,
 };
 
 const CF_API_BASE: &str = "https://api.cloudflare.com/client/v4";
@@ -88,8 +89,8 @@ pub struct CloudflareProvider {
     http: reqwest::Client,
     locks: KeyedMutex,
     /// Cached `name -> id` mapping. Populated on first lookup so subsequent
-    /// `present`/`cleanup` calls don't refetch.
-    zone_id_cache: Mutex<Option<(String, String)>>,
+    /// `present`/`cleanup` calls don't refetch, whichever zones they target.
+    zone_id_cache: Mutex<HashMap<String, String>>,
 }
 
 impl CloudflareProvider {
@@ -104,7 +105,7 @@ impl CloudflareProvider {
             config,
             http,
             locks: KeyedMutex::new(PROVIDER),
-            zone_id_cache: Mutex::new(None),
+            zone_id_cache: Mutex::new(HashMap::new()),
         })
     }
 
@@ -117,7 +118,11 @@ impl CloudflareProvider {
 
     async fn resolve_zone_name(&self, fqdn: &str) -> Result<String, DnsError> {
         match &self.config.zone_override {
-            Some(o) => Ok(o.name.clone()),
+            Some(o) => {
+                // Fails early when the FQDN is outside the configured zone.
+                relative_name(fqdn, &o.name)?;
+                Ok(o.name.clone())
+            }
             None => {
                 let zone = find_zone(fqdn).await?;
                 validate_fqdn(&zone)?;
@@ -133,10 +138,8 @@ impl CloudflareProvider {
             }
         }
 
-        if let Some((cached_name, cached_id)) = self.zone_id_cache.lock().unwrap().clone() {
-            if cached_name == zone_name {
-                return Ok(cached_id);
-            }
+        if let Some(id) = self.zone_id_cache.lock().unwrap().get(zone_name) {
+            return Ok(id.clone());
         }
 
         let url = format!(
@@ -161,7 +164,10 @@ impl CloudflareProvider {
             .find(|z| z.name == zone_name)
             .ok_or_else(|| DnsError::ZoneNotFound(zone_name.to_string()))?;
 
-        *self.zone_id_cache.lock().unwrap() = Some((zone_name.to_string(), zone.id.clone()));
+        self.zone_id_cache
+            .lock()
+            .unwrap()
+            .insert(zone_name.to_string(), zone.id.clone());
         Ok(zone.id)
     }
 
@@ -191,8 +197,10 @@ impl CloudflareProvider {
         zone_id: &str,
         fqdn: &str,
     ) -> Result<Vec<CfDnsRecord>, DnsError> {
+        // At most a couple of challenge values share a name; asking for the
+        // largest page keeps them in a single response.
         let url = format!(
-            "{}?type=TXT&name={}",
+            "{}?type=TXT&per_page=100&name={}",
             self.records_url(zone_id),
             encode_path(fqdn.trim_end_matches('.'))
         );
@@ -374,6 +382,36 @@ impl DnsProvider for CloudflareProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn zone_ids_are_cached_per_zone() {
+        use wiremock::matchers::{method, path, query_param};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        for (name, id) in [("a.example", "id-a"), ("b.example", "id-b")] {
+            Mock::given(method("GET"))
+                .and(path("/zones"))
+                .and(query_param("name", name))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "success": true, "errors": [], "messages": [],
+                    "result": [{ "id": id, "name": name }]
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+        }
+
+        let config = CloudflareConfig::new("token")
+            .with_api_base(server.uri())
+            .unwrap();
+        let provider = CloudflareProvider::new(config).unwrap();
+        // Alternating between zones looks each one up only once.
+        for _ in 0..2 {
+            assert_eq!(provider.resolve_zone_id("a.example").await.unwrap(), "id-a");
+            assert_eq!(provider.resolve_zone_id("b.example").await.unwrap(), "id-b");
+        }
+    }
 
     #[test]
     fn with_api_base_rejects_non_https() {

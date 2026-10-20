@@ -257,3 +257,20 @@ async fn with_zone_only_triggers_zone_id_lookup() {
     provider.present(FQDN, VALUE).await.unwrap();
     provider.present(FQDN, VALUE).await.unwrap();
 }
+
+#[tokio::test]
+async fn fqdn_outside_the_configured_zone_is_rejected_before_any_request() {
+    let server = MockServer::start().await;
+    Mock::given(wiremock::matchers::any())
+        .respond_with(ResponseTemplate::new(500))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let provider = build_provider(&server);
+    let err = provider
+        .present("_acme-challenge.other.org", VALUE)
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("not within zone"), "{err}");
+}
