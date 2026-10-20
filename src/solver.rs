@@ -6,7 +6,7 @@ use instant_acme::{
     AuthorizationStatus, ChallengeType, Identifier, Order, OrderStatus, RetryPolicy,
 };
 
-use crate::cleanup::CleanupGuard;
+use crate::cleanup::{CleanupErrorHook, CleanupGuard};
 use crate::dns::wait_for_propagation;
 use crate::error::DnsError;
 use crate::provider::{DnsProvider, PropagationTiming};
@@ -60,6 +60,7 @@ pub struct Dns01Solver<P: DnsProvider + 'static> {
     fallback_resolvers: Vec<String>,
     timing: Option<PropagationTiming>,
     skip_propagation: Option<Duration>,
+    on_cleanup_error: Option<CleanupErrorHook>,
 }
 
 impl<P: DnsProvider + 'static> Dns01Solver<P> {
@@ -73,6 +74,7 @@ impl<P: DnsProvider + 'static> Dns01Solver<P> {
                 .collect(),
             timing: None,
             skip_propagation: None,
+            on_cleanup_error: None,
         }
     }
 
@@ -107,6 +109,18 @@ impl<P: DnsProvider + 'static> Dns01Solver<P> {
         self
     }
 
+    /// Calls `hook` with the record FQDN and the error whenever removing a
+    /// TXT record fails, including from the task spawned when the solve
+    /// future is dropped. Without a hook, such failures are ignored. The hook
+    /// runs on the cleanup path, so it should return quickly.
+    pub fn on_cleanup_error<F>(mut self, hook: F) -> Self
+    where
+        F: Fn(&str, &DnsError) + Send + Sync + 'static,
+    {
+        self.on_cleanup_error = Some(Arc::new(hook));
+        self
+    }
+
     /// Drive the order from Pending to a certificate. Returns
     /// `(certificate_chain_pem, private_key_pem)`.
     ///
@@ -114,8 +128,9 @@ impl<P: DnsProvider + 'static> Dns01Solver<P> {
     /// error. If this future is dropped before completing (a caller-side
     /// timeout, a `select!`, a shutdown), the records still in place are
     /// removed from a task spawned on the current Tokio runtime. Cleanup is
-    /// best-effort either way: a failing `cleanup` is not reported, and the
-    /// spawned task does not run if the runtime shuts down first.
+    /// best-effort either way: a failing `cleanup` does not change the
+    /// outcome and is only reported to [`on_cleanup_error`](Self::on_cleanup_error),
+    /// and the spawned task does not run if the runtime shuts down first.
     pub async fn solve_and_finalize(&self, order: Order) -> Result<(String, String), DnsError> {
         let driver = InstantAcmeDriver::new(order);
         self.solve_with_driver(driver).await
@@ -136,10 +151,16 @@ impl<P: DnsProvider + 'static> Dns01Solver<P> {
 
     fn cleanup_guard(&self) -> CleanupGuard<PlacedRecord> {
         let provider = Arc::clone(&self.provider);
+        let on_error = self.on_cleanup_error.clone();
         CleanupGuard::new(move |record: PlacedRecord| {
             let provider = Arc::clone(&provider);
+            let on_error = on_error.clone();
             async move {
-                let _ = provider.cleanup(&record.fqdn, &record.value).await;
+                if let Err(e) = provider.cleanup(&record.fqdn, &record.value).await {
+                    if let Some(hook) = on_error {
+                        hook(&record.fqdn, &e);
+                    }
+                }
             }
         })
     }
@@ -865,6 +886,51 @@ mod tests {
             provider.cleaned_fqdns(),
             vec!["_acme-challenge.a.example"],
             "the one record placed before the iteration error must be cleaned"
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_cleanups_are_reported_to_the_hook() {
+        use std::sync::Arc;
+
+        struct FailingCleanup;
+        #[async_trait::async_trait]
+        impl DnsProvider for FailingCleanup {
+            async fn present(&self, _fqdn: &str, _value: &str) -> Result<(), DnsError> {
+                Ok(())
+            }
+            async fn cleanup(&self, fqdn: &str, _value: &str) -> Result<(), DnsError> {
+                if fqdn == "_acme-challenge.a.example" {
+                    return Err(DnsError::Api("cleanup refused".into()));
+                }
+                Ok(())
+            }
+        }
+
+        let reported = Arc::new(Mutex::new(Vec::new()));
+        let sink = reported.clone();
+        let solver = Dns01Solver::new(FailingCleanup)
+            .skip_propagation_check(Duration::ZERO)
+            .on_cleanup_error(move |fqdn, err| {
+                sink.lock().unwrap().push(format!("{fqdn}: {err}"));
+            });
+        let driver = FakeDriver::new(vec![
+            Scripted::Pending {
+                domain: "a.example".into(),
+            },
+            Scripted::Pending {
+                domain: "b.example".into(),
+            },
+        ]);
+
+        let result = solver.solve_with_driver(driver).await;
+        assert!(result.is_ok(), "a failed cleanup must not fail the solve");
+        let reported = reported.lock().unwrap().clone();
+        assert_eq!(reported.len(), 1, "{reported:?}");
+        assert!(
+            reported[0].starts_with("_acme-challenge.a.example: ")
+                && reported[0].contains("cleanup refused"),
+            "{reported:?}"
         );
     }
 }

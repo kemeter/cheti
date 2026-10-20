@@ -29,7 +29,7 @@ use instant_acme::{
 };
 use rcgen::{CertificateParams, CustomExtension, KeyPair};
 
-use crate::cleanup::CleanupGuard;
+use crate::cleanup::{CleanupErrorHook, CleanupGuard};
 use crate::error::DnsError;
 
 /// The ALPN protocol identifier a TLS-ALPN-01 validator negotiates. A server
@@ -113,6 +113,7 @@ pub fn build_challenge_certificate(
 /// delegating certificate presentation to a [`ChallengeResponder`].
 pub struct TlsAlpn01Solver<R: ChallengeResponder + 'static> {
     responder: Arc<R>,
+    on_cleanup_error: Option<CleanupErrorHook>,
 }
 
 impl<R: ChallengeResponder + 'static> TlsAlpn01Solver<R> {
@@ -120,7 +121,20 @@ impl<R: ChallengeResponder + 'static> TlsAlpn01Solver<R> {
     pub fn new(responder: R) -> Self {
         Self {
             responder: Arc::new(responder),
+            on_cleanup_error: None,
         }
+    }
+
+    /// Calls `hook` with the domain and the error whenever tearing down a
+    /// challenge certificate fails, including from the task spawned when the
+    /// solve future is dropped. Without a hook, such failures are ignored. The
+    /// hook runs on the cleanup path, so it should return quickly.
+    pub fn on_cleanup_error<F>(mut self, hook: F) -> Self
+    where
+        F: Fn(&str, &DnsError) + Send + Sync + 'static,
+    {
+        self.on_cleanup_error = Some(Arc::new(hook));
+        self
     }
 
     /// Present each domain's challenge certificate, mark the challenges ready,
@@ -130,7 +144,8 @@ impl<R: ChallengeResponder + 'static> TlsAlpn01Solver<R> {
     /// error. If this future is dropped before completing (shutdown, timeout),
     /// the domains still presented are torn down from a task spawned on the
     /// current Tokio runtime. Teardown is **best-effort** either way: a
-    /// `cleanup` that itself fails is swallowed, not surfaced, and the spawned
+    /// `cleanup` that itself fails does not change the outcome and is only
+    /// reported to [`on_cleanup_error`](Self::on_cleanup_error), and the spawned
     /// task does not run if the runtime shuts down first. A responder that must
     /// not leak challenge material should give its presentations a short lease
     /// of their own.
@@ -144,16 +159,23 @@ impl<R: ChallengeResponder + 'static> TlsAlpn01Solver<R> {
         outcome
     }
 
-    /// Teardown of presented domains. Cleanup errors are swallowed (cheti
-    /// carries no logger, matching the DNS-01 solver): the caller's outcome —
-    /// the issued certificate or the primary error — is what matters, and a
-    /// stale challenge certificate is inert once validation is over.
+    /// Teardown of presented domains. Cleanup errors go to the hook only
+    /// (cheti carries no logger, matching the DNS-01 solver): the caller's
+    /// outcome — the issued certificate or the primary error — is what
+    /// matters, and a stale challenge certificate is inert once validation is
+    /// over.
     fn cleanup_guard(&self) -> CleanupGuard<String> {
         let responder = Arc::clone(&self.responder);
+        let on_error = self.on_cleanup_error.clone();
         CleanupGuard::new(move |domain: String| {
             let responder = Arc::clone(&responder);
+            let on_error = on_error.clone();
             async move {
-                let _ = responder.cleanup(&domain).await;
+                if let Err(e) = responder.cleanup(&domain).await {
+                    if let Some(hook) = on_error {
+                        hook(&domain, &e);
+                    }
+                }
             }
         })
     }
@@ -336,5 +358,47 @@ mod tests {
         let a = build_challenge_certificate("a.example.com", &[0x01; 32]).unwrap();
         let b = build_challenge_certificate("b.example.com", &[0x02; 32]).unwrap();
         assert_ne!(a.cert_der, b.cert_der);
+    }
+
+    #[tokio::test]
+    async fn failed_teardowns_are_reported_to_the_hook() {
+        use std::sync::Mutex;
+
+        struct FailingCleanup;
+        #[async_trait]
+        impl ChallengeResponder for FailingCleanup {
+            async fn present(
+                &self,
+                _domain: &str,
+                _cert_der: Vec<u8>,
+                _key_der: Vec<u8>,
+            ) -> Result<(), DnsError> {
+                Ok(())
+            }
+            async fn cleanup(&self, domain: &str) -> Result<(), DnsError> {
+                if domain == "a.example" {
+                    return Err(DnsError::Other("teardown refused".into()));
+                }
+                Ok(())
+            }
+        }
+
+        let reported = Arc::new(Mutex::new(Vec::new()));
+        let sink = reported.clone();
+        let solver = TlsAlpn01Solver::new(FailingCleanup).on_cleanup_error(move |domain, err| {
+            sink.lock().unwrap().push(format!("{domain}: {err}"));
+        });
+
+        let mut guard = solver.cleanup_guard();
+        guard.push("a.example".to_string());
+        guard.push("b.example".to_string());
+        guard.run().await;
+
+        let reported = reported.lock().unwrap().clone();
+        assert_eq!(reported.len(), 1, "{reported:?}");
+        assert!(
+            reported[0].starts_with("a.example: ") && reported[0].contains("teardown refused"),
+            "{reported:?}"
+        );
     }
 }
