@@ -24,6 +24,7 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const PROVIDER: &str = "ovh";
 
+/// Configuration for the OVH provider.
 pub struct OvhConfig {
     application_key: SecretString,
     application_secret: SecretString,
@@ -33,6 +34,8 @@ pub struct OvhConfig {
 }
 
 impl OvhConfig {
+    /// Uses the application key, application secret and consumer key created at
+    /// <https://api.ovh.com/createToken/>. Targets the OVH Europe API by default.
     pub fn new(
         application_key: impl Into<String>,
         application_secret: impl Into<String>,
@@ -47,6 +50,8 @@ impl OvhConfig {
         }
     }
 
+    /// Overrides the API base URL, e.g. to target a mock server. It must use
+    /// `https://` (`http://` is accepted for `localhost` only).
     pub fn with_api_base(mut self, api_base: impl Into<String>) -> Result<Self, DnsError> {
         let base = api_base.into();
         validate_https_base(&base, PROVIDER)?;
@@ -65,6 +70,7 @@ impl OvhConfig {
     }
 }
 
+/// [`DnsProvider`] backed by the OVH API.
 pub struct OvhProvider {
     config: OvhConfig,
     http: reqwest::Client,
@@ -76,6 +82,7 @@ pub struct OvhProvider {
 }
 
 impl OvhProvider {
+    /// Builds the provider and its HTTP client.
     pub fn new(config: OvhConfig) -> Result<Self, DnsError> {
         let http = reqwest::Client::builder()
             .timeout(HTTP_TIMEOUT)
@@ -90,6 +97,8 @@ impl OvhProvider {
         })
     }
 
+    /// Builds the provider from `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET` and
+    /// `OVH_CONSUMER_KEY`.
     pub fn from_env() -> Result<Self, DnsError> {
         let ak =
             env::var(ENV_APP_KEY).map_err(|_| DnsError::MissingCredentials(ENV_APP_KEY.into()))?;

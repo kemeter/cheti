@@ -116,6 +116,7 @@ pub struct TlsAlpn01Solver<R: ChallengeResponder + 'static> {
 }
 
 impl<R: ChallengeResponder + 'static> TlsAlpn01Solver<R> {
+    /// Solve with `responder` serving the challenge certificates.
     pub fn new(responder: R) -> Self {
         Self {
             responder: Arc::new(responder),

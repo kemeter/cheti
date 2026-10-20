@@ -32,10 +32,13 @@ pub struct FileAccountStore {
 }
 
 impl FileAccountStore {
+    /// Store credentials in the JSON file at `path`. Parent directories are
+    /// created on the first save.
     pub fn new(path: impl Into<PathBuf>) -> Self {
         Self { path: path.into() }
     }
 
+    /// The file credentials are read from and written to.
     pub fn path(&self) -> &Path {
         &self.path
     }

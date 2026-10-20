@@ -46,6 +46,8 @@ impl BunnyConfig {
         }
     }
 
+    /// Overrides the API base URL, e.g. to target a mock server. It must use
+    /// `https://` (`http://` is accepted for `localhost` only).
     pub fn with_api_base(mut self, api_base: impl Into<String>) -> Result<Self, DnsError> {
         let base = api_base.into();
         validate_https_base(&base, PROVIDER)?;
@@ -63,6 +65,7 @@ impl BunnyConfig {
     }
 }
 
+/// [`DnsProvider`] backed by the Bunny DNS API.
 pub struct BunnyProvider {
     config: BunnyConfig,
     http: reqwest::Client,
@@ -76,6 +79,7 @@ struct Zone {
 }
 
 impl BunnyProvider {
+    /// Builds the provider and its HTTP client.
     pub fn new(config: BunnyConfig) -> Result<Self, DnsError> {
         let http = reqwest::Client::builder()
             .timeout(HTTP_TIMEOUT)
@@ -89,6 +93,7 @@ impl BunnyProvider {
         })
     }
 
+    /// Builds the provider from `BUNNY_API_KEY`.
     pub fn from_env() -> Result<Self, DnsError> {
         let api_key =
             env::var(ENV_API_KEY).map_err(|_| DnsError::MissingCredentials(ENV_API_KEY.into()))?;

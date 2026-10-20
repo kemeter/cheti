@@ -34,6 +34,7 @@ pub struct MockDnsProvider {
 }
 
 impl MockDnsProvider {
+    /// An empty mock that accepts every call.
     pub fn new() -> Self {
         Self::default()
     }
@@ -100,6 +101,9 @@ impl DnsProvider for MockDnsProvider {
 /// One recorded presentation: `(domain, cert_der, key_der)`.
 type Presentation = (String, Vec<u8>, Vec<u8>);
 
+/// In-memory [`ChallengeResponder`] holding the
+/// certificates currently presented: `present` adds one, `cleanup` removes
+/// it. Clones share the same state.
 #[derive(Clone, Default)]
 pub struct MockChallengeResponder {
     presented: Arc<Mutex<Vec<Presentation>>>,
@@ -107,6 +111,7 @@ pub struct MockChallengeResponder {
 }
 
 impl MockChallengeResponder {
+    /// An empty mock that accepts every call.
     pub fn new() -> Self {
         Self::default()
     }

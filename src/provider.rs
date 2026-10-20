@@ -4,9 +4,12 @@ use async_trait::async_trait;
 
 use crate::error::DnsError;
 
+/// How long, and how often, the solver polls DNS for a placed record.
 #[derive(Debug, Clone, Copy)]
 pub struct PropagationTiming {
+    /// Give up after this long. Defaults to 120s.
     pub timeout: Duration,
+    /// Wait this long between two polls. Defaults to 5s.
     pub interval: Duration,
 }
 
@@ -26,10 +29,19 @@ impl Default for PropagationTiming {
 /// `Box<dyn DnsProvider>` when the concrete provider is chosen at runtime.
 #[async_trait]
 pub trait DnsProvider: Send + Sync {
+    /// Adds `value` to the TXT records at `fqdn`.
+    ///
+    /// Must keep any other value already there: a wildcard and its apex share
+    /// the same `_acme-challenge` name and are validated at the same time.
+    /// Presenting a value that is already there must succeed.
     async fn present(&self, fqdn: &str, value: &str) -> Result<(), DnsError>;
 
+    /// Removes `value` from the TXT records at `fqdn`, leaving any other value
+    /// in place. Removing a value that is not there must succeed.
     async fn cleanup(&self, fqdn: &str, value: &str) -> Result<(), DnsError>;
 
+    /// Propagation polling suited to this provider. Defaults to
+    /// [`PropagationTiming::default`].
     fn timing(&self) -> PropagationTiming {
         PropagationTiming::default()
     }

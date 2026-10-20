@@ -21,6 +21,7 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const PROVIDER: &str = "desec";
 
+/// Configuration for the deSEC provider.
 pub struct DesecConfig {
     token: SecretString,
     api_base: String,
@@ -28,6 +29,7 @@ pub struct DesecConfig {
 }
 
 impl DesecConfig {
+    /// Uses a deSEC API token.
     pub fn new(token: impl Into<String>) -> Self {
         Self {
             token: SecretString::new(token.into().into()),
@@ -36,6 +38,8 @@ impl DesecConfig {
         }
     }
 
+    /// Overrides the API base URL, e.g. to target a mock server. It must use
+    /// `https://` (`http://` is accepted for `localhost` only).
     pub fn with_api_base(mut self, api_base: impl Into<String>) -> Result<Self, DnsError> {
         let base = api_base.into();
         validate_https_base(&base, PROVIDER)?;
@@ -54,6 +58,7 @@ impl DesecConfig {
     }
 }
 
+/// [`DnsProvider`] backed by the deSEC API.
 pub struct DesecProvider {
     config: DesecConfig,
     http: reqwest::Client,
@@ -67,6 +72,7 @@ struct ResolvedZone {
 }
 
 impl DesecProvider {
+    /// Builds the provider and its HTTP client.
     pub fn new(config: DesecConfig) -> Result<Self, DnsError> {
         let http = reqwest::Client::builder()
             .timeout(HTTP_TIMEOUT)
@@ -80,6 +86,7 @@ impl DesecProvider {
         })
     }
 
+    /// Builds the provider from `DESEC_TOKEN`.
     pub fn from_env() -> Result<Self, DnsError> {
         let token =
             env::var(ENV_TOKEN).map_err(|_| DnsError::MissingCredentials(ENV_TOKEN.into()))?;

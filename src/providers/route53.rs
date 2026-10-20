@@ -72,6 +72,8 @@ pub struct Route53Config {
 }
 
 impl Route53Config {
+    /// Uses an IAM access key. Temporary credentials also need
+    /// [`with_session_token`](Self::with_session_token).
     pub fn new(access_key_id: impl Into<String>, secret_access_key: impl Into<String>) -> Self {
         Self {
             access_key_id: access_key_id.into(),
@@ -111,6 +113,7 @@ impl Route53Config {
     }
 }
 
+/// [`DnsProvider`] backed by the Route53 API.
 pub struct Route53Provider {
     config: Route53Config,
     http: reqwest::Client,
@@ -121,6 +124,7 @@ pub struct Route53Provider {
 }
 
 impl Route53Provider {
+    /// Builds the provider and its HTTP client.
     pub fn new(config: Route53Config) -> Result<Self, DnsError> {
         let http = reqwest::Client::builder()
             .timeout(HTTP_TIMEOUT)

@@ -28,6 +28,7 @@ const ALREADY_EXISTS: &str = "dns_record_already_exists";
 /// partial listing could hide the record we are looking for.
 const MAX_PAGES: u32 = 100;
 
+/// Configuration for the Infomaniak provider.
 pub struct InfomaniakConfig {
     access_token: SecretString,
     api_base: String,
@@ -35,6 +36,7 @@ pub struct InfomaniakConfig {
 }
 
 impl InfomaniakConfig {
+    /// Uses an Infomaniak API token with the `dns:read` and `dns:write` scopes.
     pub fn new(access_token: impl Into<String>) -> Self {
         Self {
             access_token: SecretString::new(access_token.into().into()),
@@ -43,6 +45,8 @@ impl InfomaniakConfig {
         }
     }
 
+    /// Overrides the API base URL, e.g. to target a mock server. It must use
+    /// `https://` (`http://` is accepted for `localhost` only).
     pub fn with_api_base(mut self, api_base: impl Into<String>) -> Result<Self, DnsError> {
         let base = api_base.into();
         validate_https_base(&base, PROVIDER)?;
@@ -61,6 +65,7 @@ impl InfomaniakConfig {
     }
 }
 
+/// [`DnsProvider`] backed by the Infomaniak API.
 pub struct InfomaniakProvider {
     config: InfomaniakConfig,
     http: reqwest::Client,
@@ -71,6 +76,7 @@ pub struct InfomaniakProvider {
 }
 
 impl InfomaniakProvider {
+    /// Builds the provider and its HTTP client.
     pub fn new(config: InfomaniakConfig) -> Result<Self, DnsError> {
         let http = reqwest::Client::builder()
             .timeout(HTTP_TIMEOUT)
@@ -85,6 +91,7 @@ impl InfomaniakProvider {
         })
     }
 
+    /// Builds the provider from `INFOMANIAK_ACCESS_TOKEN`.
     pub fn from_env() -> Result<Self, DnsError> {
         let token =
             env::var(ENV_TOKEN).map_err(|_| DnsError::MissingCredentials(ENV_TOKEN.into()))?;
