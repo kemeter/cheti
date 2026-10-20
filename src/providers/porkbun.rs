@@ -10,7 +10,7 @@ use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
     encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
-    validate_zone, KeyedMutex, SendRetrying,
+    validate_ttl, validate_zone, KeyedMutex, SendRetrying,
 };
 
 const PORKBUN_API_BASE: &str = "https://api.porkbun.com/api/json/v3";
@@ -46,6 +46,8 @@ pub struct PorkbunConfig {
     secret_api_key: SecretString,
     api_base: String,
     zone_override: Option<String>,
+    ttl: u32,
+    timeout: Duration,
 }
 
 impl PorkbunConfig {
@@ -57,6 +59,8 @@ impl PorkbunConfig {
             secret_api_key: SecretString::new(secret_api_key.into().into()),
             api_base: PORKBUN_API_BASE.to_string(),
             zone_override: None,
+            ttl: DEFAULT_TTL,
+            timeout: HTTP_TIMEOUT,
         }
     }
 
@@ -77,6 +81,19 @@ impl PorkbunConfig {
         self.zone_override = Some(zone.trim_end_matches('.').to_ascii_lowercase());
         Ok(self)
     }
+
+    /// TTL of the TXT records `present` creates. Defaults to 600 seconds.
+    /// Porkbun rejects TTLs below the account minimum, which is 600 by default.
+    pub fn with_ttl(mut self, ttl: u32) -> Result<Self, DnsError> {
+        self.ttl = validate_ttl(ttl)?;
+        Ok(self)
+    }
+
+    /// Upper bound for one HTTP request to the API. Defaults to 30 seconds.
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
 }
 
 /// [`DnsProvider`] backed by the Porkbun API.
@@ -90,7 +107,7 @@ impl PorkbunProvider {
     /// Builds the provider and its HTTP client.
     pub fn new(config: PorkbunConfig) -> Result<Self, DnsError> {
         let http = reqwest::Client::builder()
-            .timeout(HTTP_TIMEOUT)
+            .timeout(config.timeout)
             .connect_timeout(CONNECT_TIMEOUT)
             .build()
             .map_err(DnsError::Http)?;
@@ -193,7 +210,7 @@ impl PorkbunProvider {
             name: subdomain,
             record_type: "TXT",
             content: value,
-            ttl: DEFAULT_TTL,
+            ttl: self.config.ttl,
         };
         let body = match self.post(&path, zone, fields).await {
             Ok(body) => body,

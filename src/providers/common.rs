@@ -190,6 +190,18 @@ pub(crate) fn validate_zone(zone: &str) -> Result<(), DnsError> {
     Ok(())
 }
 
+/// RFC 2181 §8: a TTL is an unsigned number between 0 and 2^31 - 1.
+const MAX_TTL: u32 = i32::MAX as u32;
+
+pub(crate) fn validate_ttl(ttl: u32) -> Result<u32, DnsError> {
+    if ttl > MAX_TTL {
+        return Err(DnsError::Other(format!(
+            "TTL must be at most {MAX_TTL}, got {ttl}"
+        )));
+    }
+    Ok(ttl)
+}
+
 pub(crate) fn validate_fqdn(fqdn: &str) -> Result<(), DnsError> {
     let trimmed = fqdn.trim_end_matches('.');
     if trimmed.is_empty() || trimmed.len() > 253 {
@@ -276,6 +288,13 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    #[test]
+    fn validate_ttl_accepts_the_rfc2181_range_only() {
+        assert_eq!(validate_ttl(0).unwrap(), 0);
+        assert_eq!(validate_ttl(i32::MAX as u32).unwrap(), i32::MAX as u32);
+        assert!(validate_ttl(i32::MAX as u32 + 1).is_err());
+    }
 
     #[test]
     fn relative_name_strips_zone_suffix() {

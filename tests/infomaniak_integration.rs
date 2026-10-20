@@ -496,3 +496,30 @@ async fn listing_beyond_page_cap_is_an_error() {
     let err = provider.cleanup(FQDN, VALUE).await.unwrap_err();
     assert!(err.to_string().contains("pages"), "{err}");
 }
+
+#[tokio::test]
+async fn present_uses_the_configured_ttl() {
+    let server = MockServer::start().await;
+    mount_records(&server, json!([])).await;
+
+    Mock::given(method("POST"))
+        .and(path(RECORDS_PATH))
+        .respond_with(move |req: &Request| {
+            let body: Value = serde_json::from_slice(&req.body).unwrap();
+            assert_eq!(body["ttl"], 120);
+            created(req)
+        })
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let config = InfomaniakConfig::new("test-token")
+        .with_api_base(server.uri())
+        .unwrap()
+        .with_zone(ZONE)
+        .unwrap()
+        .with_ttl(120)
+        .unwrap();
+    let provider = InfomaniakProvider::new(config).unwrap();
+    provider.present(FQDN, VALUE).await.unwrap();
+}

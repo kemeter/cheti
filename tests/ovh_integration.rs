@@ -440,3 +440,46 @@ async fn requests_are_signed_with_the_ovh_server_clock() {
     provider.cleanup(FQDN, VALUE).await.unwrap();
     provider.cleanup(FQDN, VALUE).await.unwrap();
 }
+
+#[tokio::test]
+async fn present_uses_the_configured_ttl() {
+    let server = MockServer::start().await;
+
+    ovh_signed()
+        .and(method("GET"))
+        .and(path(RECORDS_PATH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+
+    ovh_signed()
+        .and(method("POST"))
+        .and(path(RECORDS_PATH))
+        .respond_with(move |req: &Request| {
+            let body: Value = serde_json::from_slice(&req.body).unwrap();
+            assert_eq!(body["ttl"], 120);
+            ResponseTemplate::new(200).set_body_json(json!({
+                "id": 42, "fieldType": "TXT", "subDomain": SUB_DOMAIN, "target": VALUE, "ttl": 120, "zone": ZONE
+            }))
+        })
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    ovh_signed()
+        .and(method("POST"))
+        .and(path(REFRESH_PATH))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+
+    let config = OvhConfig::new("test-app-key", "test-app-secret", "test-consumer-key")
+        .with_api_base(server.uri())
+        .unwrap()
+        .with_zone(ZONE)
+        .unwrap()
+        .with_ttl(120)
+        .unwrap();
+    let provider = OvhProvider::new(config).unwrap();
+    provider.present(FQDN, VALUE).await.unwrap();
+}

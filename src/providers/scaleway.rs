@@ -10,7 +10,7 @@ use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
     api_error, encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
-    validate_zone, KeyedMutex, SendRetrying,
+    validate_ttl, validate_zone, KeyedMutex, SendRetrying,
 };
 
 const SCW_API_BASE: &str = "https://api.scaleway.com";
@@ -25,6 +25,8 @@ pub struct ScalewayConfig {
     secret_key: SecretString,
     api_base: String,
     zone_override: Option<String>,
+    ttl: u32,
+    timeout: Duration,
 }
 
 impl ScalewayConfig {
@@ -34,6 +36,8 @@ impl ScalewayConfig {
             secret_key: SecretString::new(secret_key.into().into()),
             api_base: SCW_API_BASE.to_string(),
             zone_override: None,
+            ttl: DEFAULT_TTL,
+            timeout: HTTP_TIMEOUT,
         }
     }
 
@@ -55,6 +59,18 @@ impl ScalewayConfig {
         self.zone_override = Some(zone.trim_end_matches('.').to_ascii_lowercase());
         Ok(self)
     }
+
+    /// TTL of the TXT records `present` creates. Defaults to 300 seconds.
+    pub fn with_ttl(mut self, ttl: u32) -> Result<Self, DnsError> {
+        self.ttl = validate_ttl(ttl)?;
+        Ok(self)
+    }
+
+    /// Upper bound for one HTTP request to the API. Defaults to 30 seconds.
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
 }
 
 /// [`DnsProvider`] backed by the Scaleway API.
@@ -68,7 +84,7 @@ impl ScalewayProvider {
     /// Builds the provider and its HTTP client.
     pub fn new(config: ScalewayConfig) -> Result<Self, DnsError> {
         let http = reqwest::Client::builder()
-            .timeout(HTTP_TIMEOUT)
+            .timeout(config.timeout)
             .connect_timeout(CONNECT_TIMEOUT)
             .build()
             .map_err(DnsError::Http)?;
@@ -141,7 +157,7 @@ impl ScalewayProvider {
                 name: id_fields.name.clone(),
                 r#type: id_fields.r#type.clone(),
                 data: v.clone(),
-                ttl: DEFAULT_TTL,
+                ttl: self.config.ttl,
             })
             .collect();
 

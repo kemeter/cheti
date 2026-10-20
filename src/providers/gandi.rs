@@ -10,7 +10,7 @@ use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
     api_error, encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
-    validate_zone, KeyedMutex, SendRetrying,
+    validate_ttl, validate_zone, KeyedMutex, SendRetrying,
 };
 
 const GANDI_API_BASE: &str = "https://api.gandi.net/v5";
@@ -25,6 +25,8 @@ pub struct GandiConfig {
     personal_access_token: SecretString,
     api_base: String,
     zone_override: Option<String>,
+    ttl: u32,
+    timeout: Duration,
 }
 
 impl GandiConfig {
@@ -34,6 +36,8 @@ impl GandiConfig {
             personal_access_token: SecretString::new(personal_access_token.into().into()),
             api_base: GANDI_API_BASE.to_string(),
             zone_override: None,
+            ttl: DEFAULT_TTL,
+            timeout: HTTP_TIMEOUT,
         }
     }
 
@@ -55,6 +59,18 @@ impl GandiConfig {
         self.zone_override = Some(zone.trim_end_matches('.').to_ascii_lowercase());
         Ok(self)
     }
+
+    /// TTL of the TXT records `present` creates. Defaults to 300 seconds.
+    pub fn with_ttl(mut self, ttl: u32) -> Result<Self, DnsError> {
+        self.ttl = validate_ttl(ttl)?;
+        Ok(self)
+    }
+
+    /// Upper bound for one HTTP request to the API. Defaults to 30 seconds.
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
 }
 
 /// [`DnsProvider`] backed by the Gandi API.
@@ -68,7 +84,7 @@ impl GandiProvider {
     /// Builds the provider and its HTTP client.
     pub fn new(config: GandiConfig) -> Result<Self, DnsError> {
         let http = reqwest::Client::builder()
-            .timeout(HTTP_TIMEOUT)
+            .timeout(config.timeout)
             .connect_timeout(CONNECT_TIMEOUT)
             .build()
             .map_err(DnsError::Http)?;
@@ -134,7 +150,7 @@ impl GandiProvider {
     async fn put_values(&self, zone: &str, rname: &str, values: &[String]) -> Result<(), DnsError> {
         let url = self.record_url(zone, rname);
         let body = TxtRecordBody {
-            rrset_ttl: DEFAULT_TTL,
+            rrset_ttl: self.config.ttl,
             rrset_values: values.to_vec(),
         };
 

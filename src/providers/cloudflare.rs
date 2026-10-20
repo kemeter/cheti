@@ -12,7 +12,7 @@ use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
     api_error, encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
-    validate_zone, KeyedMutex, SendRetrying,
+    validate_ttl, validate_zone, KeyedMutex, SendRetrying,
 };
 
 const CF_API_BASE: &str = "https://api.cloudflare.com/client/v4";
@@ -27,6 +27,8 @@ pub struct CloudflareConfig {
     api_token: SecretString,
     api_base: String,
     zone_override: Option<ZoneOverride>,
+    ttl: u32,
+    timeout: Duration,
 }
 
 #[derive(Clone)]
@@ -42,6 +44,8 @@ impl CloudflareConfig {
             api_token: SecretString::new(api_token.into().into()),
             api_base: CF_API_BASE.to_string(),
             zone_override: None,
+            ttl: DEFAULT_TTL,
+            timeout: HTTP_TIMEOUT,
         }
     }
 
@@ -81,6 +85,18 @@ impl CloudflareConfig {
         });
         Ok(self)
     }
+
+    /// TTL of the TXT records `present` creates. Defaults to 60 seconds.
+    pub fn with_ttl(mut self, ttl: u32) -> Result<Self, DnsError> {
+        self.ttl = validate_ttl(ttl)?;
+        Ok(self)
+    }
+
+    /// Upper bound for one HTTP request to the API. Defaults to 30 seconds.
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
 }
 
 /// [`DnsProvider`] backed by the Cloudflare API.
@@ -97,7 +113,7 @@ impl CloudflareProvider {
     /// Builds the provider and its HTTP client.
     pub fn new(config: CloudflareConfig) -> Result<Self, DnsError> {
         let http = reqwest::Client::builder()
-            .timeout(HTTP_TIMEOUT)
+            .timeout(config.timeout)
             .connect_timeout(CONNECT_TIMEOUT)
             .build()
             .map_err(DnsError::Http)?;
@@ -235,7 +251,7 @@ impl CloudflareProvider {
             r#type: "TXT",
             name: fqdn.trim_end_matches('.'),
             content: &quoted,
-            ttl: DEFAULT_TTL,
+            ttl: self.config.ttl,
         };
         let response = self
             .http

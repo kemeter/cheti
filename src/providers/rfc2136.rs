@@ -23,7 +23,7 @@ use zeroize::Zeroizing;
 use crate::dns::find_zone;
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
-use crate::providers::common::{validate_acme_value, validate_fqdn, validate_zone};
+use crate::providers::common::{validate_acme_value, validate_fqdn, validate_ttl, validate_zone};
 
 const ENV_NAMESERVER: &str = "RFC2136_NAMESERVER";
 const ENV_TSIG_KEY: &str = "RFC2136_TSIG_KEY";
@@ -31,8 +31,6 @@ const ENV_TSIG_SECRET: &str = "RFC2136_TSIG_SECRET";
 const ENV_TSIG_ALGORITHM: &str = "RFC2136_TSIG_ALGORITHM";
 const DEFAULT_PORT: u16 = 53;
 const DEFAULT_TTL: u32 = 60;
-/// RFC 2181 §8: a TTL is an unsigned number between 0 and 2^31 - 1.
-const MAX_TTL: u32 = i32::MAX as u32;
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Allowed clock skew between us and the server, in seconds. 300 is the
 /// value recommended by RFC 8945 §10.
@@ -149,12 +147,7 @@ impl Rfc2136Config {
 
     /// TTL of the TXT records written. Defaults to 60 seconds.
     pub fn with_ttl(mut self, ttl: u32) -> Result<Self, DnsError> {
-        if ttl > MAX_TTL {
-            return Err(DnsError::Other(format!(
-                "TTL must be at most {MAX_TTL}, got {ttl}"
-            )));
-        }
-        self.ttl = ttl;
+        self.ttl = validate_ttl(ttl)?;
         Ok(self)
     }
 

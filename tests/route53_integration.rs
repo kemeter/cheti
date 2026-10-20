@@ -720,3 +720,28 @@ async fn concurrent_present_calls_are_serialized() {
     assert!(final_state.contains(&quoted(VALUE)));
     assert!(final_state.contains(&quoted(OTHER_VALUE)));
 }
+
+#[tokio::test]
+async fn present_uses_the_configured_ttl() {
+    let server = MockServer::start().await;
+    mount_rrset(empty_rrset_list()).mount(&server).await;
+
+    Mock::given(method("POST"))
+        .and(path(CHANGE_PATH))
+        .respond_with(move |req: &Request| {
+            let xml = body(req);
+            assert!(xml.contains("<TTL>120</TTL>"), "{xml}");
+            change_info("C1", "INSYNC")
+        })
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let config = config(&server)
+        .with_hosted_zone_id(ZONE_ID)
+        .unwrap()
+        .with_ttl(120)
+        .unwrap();
+    let provider = Route53Provider::new(config).unwrap();
+    provider.present(FQDN, VALUE).await.unwrap();
+}

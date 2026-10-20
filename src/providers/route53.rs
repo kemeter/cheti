@@ -15,7 +15,7 @@ use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
     retry_backoff, truncate_error_body, validate_acme_value, validate_fqdn, validate_https_base,
-    KeyedMutex, SendRetrying, MAX_ATTEMPTS,
+    validate_ttl, KeyedMutex, SendRetrying, MAX_ATTEMPTS,
 };
 
 const ROUTE53_API_BASE: &str = "https://route53.amazonaws.com/2013-04-01";
@@ -69,6 +69,8 @@ pub struct Route53Config {
     session_token: Option<SecretString>,
     api_base: String,
     hosted_zone_id: Option<String>,
+    ttl: u32,
+    timeout: Duration,
 }
 
 impl Route53Config {
@@ -81,6 +83,8 @@ impl Route53Config {
             session_token: None,
             api_base: ROUTE53_API_BASE.to_string(),
             hosted_zone_id: None,
+            ttl: DEFAULT_TTL,
+            timeout: HTTP_TIMEOUT,
         }
     }
 
@@ -111,6 +115,19 @@ impl Route53Config {
             })?);
         Ok(self)
     }
+
+    /// TTL of the TXT records `present` creates. Defaults to 60 seconds. An
+    /// existing record set keeps its own TTL.
+    pub fn with_ttl(mut self, ttl: u32) -> Result<Self, DnsError> {
+        self.ttl = validate_ttl(ttl)?;
+        Ok(self)
+    }
+
+    /// Upper bound for one HTTP request to the API. Defaults to 30 seconds.
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
 }
 
 /// [`DnsProvider`] backed by the Route53 API.
@@ -127,7 +144,7 @@ impl Route53Provider {
     /// Builds the provider and its HTTP client.
     pub fn new(config: Route53Config) -> Result<Self, DnsError> {
         let http = reqwest::Client::builder()
-            .timeout(HTTP_TIMEOUT)
+            .timeout(config.timeout)
             .connect_timeout(CONNECT_TIMEOUT)
             .build()
             .map_err(DnsError::Http)?;
@@ -337,7 +354,7 @@ impl Route53Provider {
             .map(|r| r.items.into_iter().map(|r| r.value).collect())
             .unwrap_or_default();
         Ok(Some(TxtSet {
-            ttl: set.ttl.unwrap_or(DEFAULT_TTL),
+            ttl: set.ttl.unwrap_or(self.config.ttl),
             values,
         }))
     }
@@ -789,7 +806,7 @@ impl DnsProvider for Route53Provider {
                 set
             }
             None => TxtSet {
-                ttl: DEFAULT_TTL,
+                ttl: self.config.ttl,
                 values: vec![format!("\"{value}\"")],
             },
         };

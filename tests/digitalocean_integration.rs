@@ -457,3 +457,34 @@ async fn fqdn_outside_zone_is_rejected() {
         .unwrap_err();
     assert!(err.to_string().contains("not within zone"), "{err}");
 }
+
+#[tokio::test]
+async fn present_uses_the_configured_ttl() {
+    let server = MockServer::start().await;
+    mount_list(&server, vec![]).await;
+
+    Mock::given(method("POST"))
+        .and(path(RECORDS_PATH))
+        .and(body_json(json!({
+            "type": "TXT",
+            "name": "_acme-challenge",
+            "data": VALUE,
+            "ttl": 120
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "domain_record": txt_record(1, "_acme-challenge", VALUE)
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let config = DigitalOceanConfig::new("test-token")
+        .with_api_base(server.uri())
+        .unwrap()
+        .with_zone(ZONE)
+        .unwrap()
+        .with_ttl(120)
+        .unwrap();
+    let provider = DigitalOceanProvider::new(config).unwrap();
+    provider.present(FQDN, VALUE).await.unwrap();
+}
