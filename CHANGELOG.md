@@ -26,3 +26,4 @@ First release.
 - Renewal helpers (`needs_renewal*`, `cert_lifetime`) reading a leaf
   certificate's validity.
 - `testing` feature exposing `MockDnsProvider` and `MockChallengeResponder`.
+- Minimum supported Rust version: 1.89.

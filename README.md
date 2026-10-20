@@ -77,6 +77,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+A runnable version, using Cloudflare, is in [`examples/issue_certificate.rs`](examples/issue_certificate.rs).
+
 ## Providers
 
 Each provider has the same shape: a `*Config` builder, then a `*Provider` constructed from it.
