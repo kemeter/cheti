@@ -104,7 +104,9 @@ impl ScalewayProvider {
             .http
             .get(&url)
             .header("X-Auth-Token", self.config.secret_key.expose_secret())
-            .query(&[("name", rname), ("type", "TXT")])
+            // At most a couple of challenge values share a name; a page this
+            // size holds them all in a single response.
+            .query(&[("name", rname), ("type", "TXT"), ("page_size", "100")])
             .send_retrying()
             .await?;
 
