@@ -278,10 +278,11 @@ impl DnsProvider for ScalewayProvider {
 
         let _guard = self.locks.lock(&format!("{zone}|{rname}")).await;
         let mut values = self.fetch_existing(&zone, &rname).await?;
-        let owned_value = value.to_string();
-        if !values.contains(&owned_value) {
-            values.push(owned_value);
+        if values.iter().any(|v| unquote(v) == value) {
+            return Ok(());
         }
+        // Other values are written back exactly as the API returned them.
+        values.push(format!("\"{value}\""));
         self.apply_set(&zone, &rname, &values).await
     }
 
@@ -295,8 +296,12 @@ impl DnsProvider for ScalewayProvider {
 
         let _guard = self.locks.lock(&format!("{zone}|{rname}")).await;
         let values = self.fetch_existing(&zone, &rname).await?;
-        let remaining: Vec<String> = values.into_iter().filter(|v| v != value).collect();
+        let count = values.len();
+        let remaining: Vec<String> = values.into_iter().filter(|v| unquote(v) != value).collect();
 
+        if remaining.len() == count {
+            return Ok(());
+        }
         if remaining.is_empty() {
             self.apply_delete(&zone, &rname).await
         } else {
@@ -305,9 +310,26 @@ impl DnsProvider for ScalewayProvider {
     }
 }
 
+/// TXT values are exchanged in presentation format (`"value"`), though an
+/// unquoted value written by another client may come back as is. ACME values
+/// are base64url, so they are never split into several character strings.
+fn unquote(value: &str) -> &str {
+    let trimmed = value.trim();
+    trimmed
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .unwrap_or(trimmed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unquote_strips_surrounding_quotes() {
+        assert_eq!(unquote("\"abc\""), "abc");
+        assert_eq!(unquote("abc"), "abc");
+    }
 
     #[test]
     fn with_api_base_rejects_non_https() {
