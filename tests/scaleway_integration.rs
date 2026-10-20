@@ -13,6 +13,11 @@ const VALUE: &str = "abcDEF123_-token_for_acme";
 const OTHER_VALUE: &str = "previously-placed-value-xyz";
 const RECORDS_PATH: &str = "/domain/v2beta1/dns-zones/example.com/records";
 
+/// TXT data in presentation format, as the Scaleway API returns it.
+fn quoted(value: &str) -> String {
+    format!("\"{value}\"")
+}
+
 fn build_provider(server: &MockServer) -> ScalewayProvider {
     let config = ScalewayConfig::new("test-secret")
         .with_api_base(server.uri())
@@ -59,7 +64,7 @@ async fn present_creates_record_when_absent() {
             let body: Value = serde_json::from_slice(&req.body).unwrap();
             let records = set_change_records(&body);
             assert_eq!(records.len(), 1);
-            assert_eq!(records[0]["data"], VALUE);
+            assert_eq!(records[0]["data"], quoted(VALUE));
             assert_eq!(records[0]["name"], RNAME);
             assert_eq!(records[0]["type"], "TXT");
             ResponseTemplate::new(200)
@@ -80,7 +85,7 @@ async fn present_merges_with_existing_values() {
         .and(path(RECORDS_PATH))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "records": [
-                { "type": "TXT", "data": OTHER_VALUE }
+                { "type": "TXT", "data": quoted(OTHER_VALUE) }
             ]
         })))
         .expect(1)
@@ -97,8 +102,8 @@ async fn present_merges_with_existing_values() {
                 .iter()
                 .map(|r| r["data"].as_str().unwrap())
                 .collect();
-            assert!(datas.contains(&OTHER_VALUE));
-            assert!(datas.contains(&VALUE));
+            assert!(datas.contains(&quoted(OTHER_VALUE).as_str()));
+            assert!(datas.contains(&quoted(VALUE).as_str()));
             ResponseTemplate::new(200)
         })
         .expect(1)
@@ -117,23 +122,18 @@ async fn present_is_idempotent_when_value_already_present() {
         .and(path(RECORDS_PATH))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "records": [
-                { "type": "TXT", "data": VALUE }
+                { "type": "TXT", "data": quoted(VALUE) }
             ]
         })))
         .expect(1)
         .mount(&server)
         .await;
 
+    // The value is already there: nothing is written.
     Mock::given(method("PATCH"))
         .and(path(RECORDS_PATH))
-        .respond_with(move |req: &Request| {
-            let body: Value = serde_json::from_slice(&req.body).unwrap();
-            let records = set_change_records(&body);
-            assert_eq!(records.len(), 1, "must not duplicate value");
-            assert_eq!(records[0]["data"], VALUE);
-            ResponseTemplate::new(200)
-        })
-        .expect(1)
+        .respond_with(ResponseTemplate::new(500))
+        .expect(0)
         .mount(&server)
         .await;
 
@@ -149,7 +149,7 @@ async fn cleanup_deletes_record_when_no_values_remain() {
         .and(path(RECORDS_PATH))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "records": [
-                { "type": "TXT", "data": VALUE }
+                { "type": "TXT", "data": quoted(VALUE) }
             ]
         })))
         .expect(1)
@@ -182,8 +182,8 @@ async fn cleanup_keeps_other_values_via_set() {
         .and(path(RECORDS_PATH))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "records": [
-                { "type": "TXT", "data": VALUE },
-                { "type": "TXT", "data": OTHER_VALUE }
+                { "type": "TXT", "data": quoted(VALUE) },
+                { "type": "TXT", "data": quoted(OTHER_VALUE) }
             ]
         })))
         .expect(1)
@@ -197,7 +197,7 @@ async fn cleanup_keeps_other_values_via_set() {
             assert!(!is_delete_change(&body), "expected set, got delete");
             let records = set_change_records(&body);
             assert_eq!(records.len(), 1);
-            assert_eq!(records[0]["data"], OTHER_VALUE);
+            assert_eq!(records[0]["data"], quoted(OTHER_VALUE));
             ResponseTemplate::new(200)
         })
         .expect(1)
@@ -216,7 +216,7 @@ async fn cleanup_tolerates_404_on_delete_patch() {
         .and(path(RECORDS_PATH))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "records": [
-                { "type": "TXT", "data": VALUE }
+                { "type": "TXT", "data": quoted(VALUE) }
             ]
         })))
         .mount(&server)
@@ -305,6 +305,6 @@ async fn concurrent_present_calls_are_serialized() {
         2,
         "both values should be present, got {final_state:?}"
     );
-    assert!(final_state.contains(&VALUE.to_string()));
-    assert!(final_state.contains(&OTHER_VALUE.to_string()));
+    assert!(final_state.contains(&quoted(VALUE)));
+    assert!(final_state.contains(&quoted(OTHER_VALUE)));
 }

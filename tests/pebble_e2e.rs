@@ -139,7 +139,12 @@ async fn issue_certificate_for_single_domain() {
         .await
         .expect("create account against pebble");
 
-    let identifiers = vec![Identifier::Dns("e2e.cheti.test".to_string())];
+    // Two identifiers, so collecting the challenges and setting them ready
+    // each cover several authorizations.
+    let identifiers = vec![
+        Identifier::Dns("e2e.cheti.test".to_string()),
+        Identifier::Dns("www.e2e.cheti.test".to_string()),
+    ];
     let order = account
         .new_order(&NewOrder::new(&identifiers))
         .await

@@ -18,6 +18,7 @@ use hickory_proto::rr::{Name, RData, Record, RecordSet, TSigVerifier, TSigner};
 use secrecy::{ExposeSecret, SecretString};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use zeroize::Zeroizing;
 
 use crate::dns::find_zone;
 use crate::error::DnsError;
@@ -230,9 +231,11 @@ fn parse_name(raw: &str, what: &str) -> Result<Name, DnsError> {
     Ok(name)
 }
 
-fn decode_secret(secret: &SecretString) -> Result<Vec<u8>, DnsError> {
+/// The decoded key is wiped when dropped.
+fn decode_secret(secret: &SecretString) -> Result<Zeroizing<Vec<u8>>, DnsError> {
     let key = BASE64
         .decode(secret.expose_secret().trim().as_bytes())
+        .map(Zeroizing::new)
         .map_err(|_| DnsError::Other(format!("{PROVIDER} TSIG secret is not valid base64")))?;
     if key.is_empty() {
         return Err(DnsError::Other(format!("{PROVIDER} TSIG secret is empty")));
@@ -382,10 +385,11 @@ impl Rfc2136Provider {
     }
 
     /// Built per update, so the decoded key only lives as long as one exchange.
+    /// hickory keeps its own copy, which it does not wipe; ours is.
     fn signer(&self) -> Result<TSigner, DnsError> {
         let key = decode_secret(&self.config.secret)?;
         TSigner::new(
-            key,
+            key.to_vec(),
             self.config.algorithm.to_hickory(),
             self.key_name.clone(),
             TSIG_FUDGE,

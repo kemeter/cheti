@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -36,8 +37,9 @@ pub(crate) trait ChallengeDriver {
     /// states yield an error.
     async fn next_dns01(&mut self) -> Option<Result<Dns01Challenge, DnsError>>;
 
-    /// Tell the ACME server that the TXT record is in place.
-    async fn set_ready(&mut self, token: usize) -> Result<(), DnsError>;
+    /// Tell the ACME server that the TXT records of these challenges are in
+    /// place, in one go.
+    async fn set_ready(&mut self, tokens: &[usize]) -> Result<(), DnsError>;
 
     /// Poll until the order is Ready, then finalize and fetch the cert chain.
     /// Returns `(certificate_chain_pem, private_key_pem)`.
@@ -179,122 +181,126 @@ impl<P: DnsProvider + 'static> Dns01Solver<P> {
             }
         }
 
-        for token in tokens {
-            driver.set_ready(token).await?;
-        }
-        Ok(())
+        driver.set_ready(&tokens).await
     }
 }
 
 /// Production `ChallengeDriver` that wraps an `instant_acme::Order`.
 ///
-/// Iterates the order's authorizations once, surfacing each pending DNS-01
-/// challenge as a `Dns01Challenge` owned by the solver. The token returned in
-/// the challenge is the index into `pending_ready`, which holds the data
-/// needed to look the challenge back up when `set_ready` is called.
+/// Each authorization is an HTTP fetch, and instant_acme's challenge handles
+/// borrow the order, so none can be kept between calls. The driver therefore
+/// reads every authorization once to collect the pending DNS-01 challenges,
+/// and once more to set them all ready: two passes whatever the number of
+/// identifiers. A challenge's token is its index in `challenge_urls`.
 pub(crate) struct InstantAcmeDriver {
     order: Order,
-    /// `(authorization_index, challenge_token_url)` — empty entries (already
-    /// served `set_ready`) are kept in place so token indices remain stable.
-    pending_ready: Vec<Option<String>>,
-    authz_cursor: usize,
+    /// Challenges (or the error that ended collection) not yielded yet;
+    /// `None` until the first `next_dns01`.
+    queue: Option<VecDeque<Result<Dns01Challenge, DnsError>>>,
+    challenge_urls: Vec<String>,
 }
 
 impl InstantAcmeDriver {
     pub(crate) fn new(order: Order) -> Self {
         Self {
             order,
-            pending_ready: Vec::new(),
-            authz_cursor: 0,
+            queue: None,
+            challenge_urls: Vec::new(),
         }
+    }
+
+    /// Reads every authorization once. Collection stops at the first error,
+    /// which is queued after the challenges found before it.
+    async fn collect(&mut self) -> VecDeque<Result<Dns01Challenge, DnsError>> {
+        let mut queue = VecDeque::new();
+        let mut authorizations = self.order.authorizations();
+        while let Some(result) = authorizations.next().await {
+            match Self::pending_challenge(result, &mut self.challenge_urls) {
+                Ok(Some(challenge)) => queue.push_back(Ok(challenge)),
+                Ok(None) => {}
+                Err(e) => {
+                    queue.push_back(Err(e));
+                    break;
+                }
+            }
+        }
+        queue
+    }
+
+    /// The DNS-01 challenge of a pending authorization, `None` for one that is
+    /// already valid.
+    fn pending_challenge(
+        result: Result<instant_acme::AuthorizationHandle<'_>, instant_acme::Error>,
+        challenge_urls: &mut Vec<String>,
+    ) -> Result<Option<Dns01Challenge>, DnsError> {
+        let mut authz = result.map_err(|e| DnsError::Acme(e.to_string()))?;
+        match authz.status {
+            AuthorizationStatus::Pending => {}
+            AuthorizationStatus::Valid => return Ok(None),
+            other => return Err(DnsError::ChallengeInvalid(format!("{other:?}"))),
+        }
+
+        let domain = match &authz.identifier().identifier {
+            Identifier::Dns(d) => d.clone(),
+            other => {
+                return Err(DnsError::Other(format!(
+                    "unsupported identifier type: {other:?}"
+                )));
+            }
+        };
+
+        let challenge = authz
+            .challenge(ChallengeType::Dns01)
+            .ok_or_else(|| DnsError::NoDns01Challenge(domain.clone()))?;
+
+        let token = challenge_urls.len();
+        challenge_urls.push(challenge.url.clone());
+        Ok(Some(Dns01Challenge {
+            fqdn: format!("_acme-challenge.{domain}"),
+            dns_value: challenge.key_authorization().dns_value(),
+            domain,
+            token,
+        }))
     }
 }
 
 impl ChallengeDriver for InstantAcmeDriver {
     async fn next_dns01(&mut self) -> Option<Result<Dns01Challenge, DnsError>> {
-        let mut authorizations = self.order.authorizations();
-
-        // Skip past authorizations we've already yielded.
-        for _ in 0..self.authz_cursor {
-            match authorizations.next().await? {
-                Ok(_) => {}
-                Err(e) => return Some(Err(DnsError::Acme(e.to_string()))),
-            }
+        if self.queue.is_none() {
+            self.queue = Some(self.collect().await);
         }
-
-        loop {
-            let mut authz = match authorizations.next().await? {
-                Ok(a) => a,
-                Err(e) => return Some(Err(DnsError::Acme(e.to_string()))),
-            };
-            self.authz_cursor += 1;
-
-            match authz.status {
-                AuthorizationStatus::Pending => {}
-                AuthorizationStatus::Valid => {
-                    self.pending_ready.push(None);
-                    continue;
-                }
-                other => {
-                    return Some(Err(DnsError::ChallengeInvalid(format!("{other:?}"))));
-                }
-            }
-
-            let domain = match &authz.identifier().identifier {
-                Identifier::Dns(d) => d.clone(),
-                other => {
-                    return Some(Err(DnsError::Other(format!(
-                        "unsupported identifier type: {other:?}"
-                    ))));
-                }
-            };
-
-            let challenge = match authz.challenge(ChallengeType::Dns01) {
-                Some(c) => c,
-                None => return Some(Err(DnsError::NoDns01Challenge(domain))),
-            };
-
-            let dns_value = challenge.key_authorization().dns_value();
-            let fqdn = format!("_acme-challenge.{domain}");
-            let url = challenge.url.clone();
-
-            let token = self.pending_ready.len();
-            self.pending_ready.push(Some(url));
-
-            return Some(Ok(Dns01Challenge {
-                domain,
-                fqdn,
-                dns_value,
-                token,
-            }));
-        }
+        self.queue.as_mut()?.pop_front()
     }
 
-    async fn set_ready(&mut self, token: usize) -> Result<(), DnsError> {
-        let target_url = self
-            .pending_ready
-            .get(token)
-            .and_then(|o| o.as_ref())
-            .ok_or_else(|| DnsError::Other(format!("invalid challenge token {token}")))?
-            .clone();
+    async fn set_ready(&mut self, tokens: &[usize]) -> Result<(), DnsError> {
+        let mut targets: Vec<&str> = Vec::with_capacity(tokens.len());
+        for token in tokens {
+            let url = self
+                .challenge_urls
+                .get(*token)
+                .ok_or_else(|| DnsError::Other(format!("invalid challenge token {token}")))?;
+            targets.push(url);
+        }
 
-        // Find the challenge again by re-iterating; instant_acme borrows from
-        // Order so we can't keep a handle across awaits.
         let mut authorizations = self.order.authorizations();
         while let Some(result) = authorizations.next().await {
             let mut authz = result.map_err(|e| DnsError::Acme(e.to_string()))?;
             if let Some(mut challenge) = authz.challenge(ChallengeType::Dns01) {
-                if challenge.url == target_url {
-                    return challenge
+                if let Some(pos) = targets.iter().position(|url| *url == challenge.url) {
+                    challenge
                         .set_ready()
                         .await
-                        .map_err(|e| DnsError::Acme(e.to_string()));
+                        .map_err(|e| DnsError::Acme(e.to_string()))?;
+                    targets.swap_remove(pos);
                 }
             }
         }
-        Err(DnsError::Other(format!(
-            "challenge {target_url} disappeared from order"
-        )))
+        match targets.first() {
+            None => Ok(()),
+            Some(url) => Err(DnsError::Other(format!(
+                "challenge {url} disappeared from order"
+            ))),
+        }
     }
 
     async fn finalize(&mut self) -> Result<(String, String), DnsError> {
@@ -472,10 +478,12 @@ mod tests {
             }
         }
 
-        async fn set_ready(&mut self, token: usize) -> Result<(), DnsError> {
-            self.set_ready_calls.lock().unwrap().push(token);
-            if self.set_ready_fail_on == Some(token) {
-                return Err(DnsError::Acme("forced set_ready failure".into()));
+        async fn set_ready(&mut self, tokens: &[usize]) -> Result<(), DnsError> {
+            for token in tokens {
+                self.set_ready_calls.lock().unwrap().push(*token);
+                if self.set_ready_fail_on == Some(*token) {
+                    return Err(DnsError::Acme("forced set_ready failure".into()));
+                }
             }
             Ok(())
         }
@@ -586,9 +594,11 @@ mod tests {
             async fn next_dns01(&mut self) -> Option<Result<Dns01Challenge, DnsError>> {
                 self.inner.next_dns01().await
             }
-            async fn set_ready(&mut self, token: usize) -> Result<(), DnsError> {
-                self.events.lock().unwrap().push(format!("ready {token}"));
-                self.inner.set_ready(token).await
+            async fn set_ready(&mut self, tokens: &[usize]) -> Result<(), DnsError> {
+                for token in tokens {
+                    self.events.lock().unwrap().push(format!("ready {token}"));
+                }
+                self.inner.set_ready(tokens).await
             }
             async fn finalize(&mut self) -> Result<(String, String), DnsError> {
                 self.inner.finalize().await
@@ -682,9 +692,9 @@ mod tests {
             async fn next_dns01(&mut self) -> Option<Result<Dns01Challenge, DnsError>> {
                 self.inner.next_dns01().await
             }
-            async fn set_ready(&mut self, token: usize) -> Result<(), DnsError> {
+            async fn set_ready(&mut self, tokens: &[usize]) -> Result<(), DnsError> {
                 *self.ready_at.lock().unwrap() = Some(tokio::time::Instant::now());
-                self.inner.set_ready(token).await
+                self.inner.set_ready(tokens).await
             }
             async fn finalize(&mut self) -> Result<(String, String), DnsError> {
                 self.inner.finalize().await

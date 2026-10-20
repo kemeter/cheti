@@ -2,6 +2,7 @@
 name = "cheti"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.89"
 authors = ["Mlanawo Mbechezi <mlanawo.mbechezi@kemeter.io>"]
 license = "MIT"
 description = "ACME DNS-01 challenge library with pluggable DNS providers"
@@ -31,6 +32,7 @@ tokio = { version = "1", features = ["time", "rt", "sync", "net", "io-util"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 secrecy = "0.10"
+zeroize = "1"
 url = "2"
 percent-encoding = "2"
 instant-acme = "0.8"

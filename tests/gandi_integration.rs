@@ -12,6 +12,11 @@ const VALUE: &str = "abcDEF123_-token_for_acme";
 const OTHER_VALUE: &str = "previously-placed-value-xyz";
 const RECORD_PATH: &str = "/livedns/domains/example.com/records/_acme-challenge/TXT";
 
+/// TXT values in presentation format, as the LiveDNS API returns them.
+fn quoted(value: &str) -> String {
+    format!("\"{value}\"")
+}
+
 fn build_provider(server: &MockServer) -> GandiProvider {
     let config = GandiConfig::new("test-token")
         .with_api_base(server.uri())
@@ -38,7 +43,7 @@ async fn present_creates_record_when_absent() {
         .and(header("authorization", "Bearer test-token"))
         .respond_with(move |req: &Request| {
             let body: Value = serde_json::from_slice(&req.body).unwrap();
-            assert_eq!(body["rrset_values"], json!([VALUE]));
+            assert_eq!(body["rrset_values"], json!([quoted(VALUE)]));
             assert_eq!(body["rrset_ttl"], 300);
             ResponseTemplate::new(201)
         })
@@ -58,7 +63,7 @@ async fn present_merges_with_existing_values() {
         .and(path(RECORD_PATH))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "rrset_ttl": 300,
-            "rrset_values": [OTHER_VALUE]
+            "rrset_values": [quoted(OTHER_VALUE)]
         })))
         .expect(1)
         .mount(&server)
@@ -70,8 +75,8 @@ async fn present_merges_with_existing_values() {
             let body: Value = serde_json::from_slice(&req.body).unwrap();
             let values = body["rrset_values"].as_array().unwrap();
             assert_eq!(values.len(), 2);
-            assert!(values.iter().any(|v| v == OTHER_VALUE));
-            assert!(values.iter().any(|v| v == VALUE));
+            assert!(values.iter().any(|v| *v == quoted(OTHER_VALUE)));
+            assert!(values.iter().any(|v| *v == quoted(VALUE)));
             ResponseTemplate::new(201)
         })
         .expect(1)
@@ -90,23 +95,17 @@ async fn present_is_idempotent_when_value_already_present() {
         .and(path(RECORD_PATH))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "rrset_ttl": 300,
-            "rrset_values": [VALUE]
+            "rrset_values": [quoted(VALUE)]
         })))
         .expect(1)
         .mount(&server)
         .await;
 
-    // PUT is still issued (Gandi is the source of truth), but with no growth.
+    // The value is already there: nothing is written.
     Mock::given(method("PUT"))
         .and(path(RECORD_PATH))
-        .respond_with(move |req: &Request| {
-            let body: Value = serde_json::from_slice(&req.body).unwrap();
-            let values = body["rrset_values"].as_array().unwrap();
-            assert_eq!(values.len(), 1, "must not duplicate value");
-            assert_eq!(values[0], VALUE);
-            ResponseTemplate::new(201)
-        })
-        .expect(1)
+        .respond_with(ResponseTemplate::new(500))
+        .expect(0)
         .mount(&server)
         .await;
 
@@ -122,7 +121,7 @@ async fn cleanup_deletes_record_when_no_values_remain() {
         .and(path(RECORD_PATH))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "rrset_ttl": 300,
-            "rrset_values": [VALUE]
+            "rrset_values": [quoted(VALUE)]
         })))
         .expect(1)
         .mount(&server)
@@ -154,7 +153,7 @@ async fn cleanup_keeps_other_values_via_put() {
         .and(path(RECORD_PATH))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "rrset_ttl": 300,
-            "rrset_values": [VALUE, OTHER_VALUE]
+            "rrset_values": [quoted(VALUE), quoted(OTHER_VALUE)]
         })))
         .expect(1)
         .mount(&server)
@@ -166,7 +165,7 @@ async fn cleanup_keeps_other_values_via_put() {
             let body: Value = serde_json::from_slice(&req.body).unwrap();
             let values = body["rrset_values"].as_array().unwrap();
             assert_eq!(values.len(), 1);
-            assert_eq!(values[0], OTHER_VALUE);
+            assert_eq!(values[0], quoted(OTHER_VALUE));
             ResponseTemplate::new(201)
         })
         .expect(1)
@@ -192,7 +191,7 @@ async fn cleanup_tolerates_404_on_delete() {
         .and(path(RECORD_PATH))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "rrset_ttl": 300,
-            "rrset_values": [VALUE]
+            "rrset_values": [quoted(VALUE)]
         })))
         .mount(&server)
         .await;
@@ -298,8 +297,8 @@ async fn concurrent_present_calls_are_serialized() {
         2,
         "both values should be present, got {final_state:?}"
     );
-    assert!(final_state.contains(&VALUE.to_string()));
-    assert!(final_state.contains(&OTHER_VALUE.to_string()));
+    assert!(final_state.contains(&quoted(VALUE)));
+    assert!(final_state.contains(&quoted(OTHER_VALUE)));
 }
 
 #[tokio::test]
@@ -330,4 +329,57 @@ async fn mixed_case_names_are_normalised() {
         .present("_ACME-Challenge.Example.com", VALUE)
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn cleanup_recognises_an_unquoted_value() {
+    let server = MockServer::start().await;
+
+    // A value written unquoted by another client still matches.
+    Mock::given(method("GET"))
+        .and(path(RECORD_PATH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "rrset_ttl": 300,
+            "rrset_values": [VALUE]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path(RECORD_PATH))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = build_provider(&server);
+    provider.cleanup(FQDN, VALUE).await.unwrap();
+}
+
+#[tokio::test]
+async fn cleanup_is_a_noop_when_value_absent() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path(RECORD_PATH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "rrset_ttl": 300,
+            "rrset_values": [quoted(OTHER_VALUE)]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(0)
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let provider = build_provider(&server);
+    provider.cleanup(FQDN, VALUE).await.unwrap();
 }
