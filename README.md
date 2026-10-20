@@ -16,7 +16,7 @@ ACME DNS-01 challenge library for Rust, with pluggable DNS providers.
 
 ## Status
 
-Early development. API may change before `0.1.0` is published to crates.io.
+Pre-1.0: minor releases (`0.x`) may change the API; see the [changelog](CHANGELOG.md).
 
 ## Quickstart
 
@@ -24,7 +24,7 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cheti = { git = "https://github.com/kemeter/cheti" }
+cheti = "0.1"
 instant-acme = "0.8"
 tokio = { version = "1", features = ["full"] }
 ```
