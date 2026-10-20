@@ -9,6 +9,9 @@ repository = "https://github.com/kemeter/cheti"
 readme = "README.md"
 keywords = ["acme", "letsencrypt", "dns", "tls", "certificate"]
 categories = ["cryptography", "network-programming"]
+# CI config and the scripts starting local test servers are of no use to
+# users of the crate.
+exclude = [".github/", "scripts/"]
 
 [features]
 # Exposes in-memory test doubles (e.g. `MockDnsProvider`) so downstream

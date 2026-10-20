@@ -20,6 +20,7 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const PROVIDER: &str = "scaleway";
 
+/// Configuration for the Scaleway provider.
 pub struct ScalewayConfig {
     secret_key: SecretString,
     api_base: String,
@@ -27,6 +28,7 @@ pub struct ScalewayConfig {
 }
 
 impl ScalewayConfig {
+    /// Uses a Scaleway API secret key.
     pub fn new(secret_key: impl Into<String>) -> Self {
         Self {
             secret_key: SecretString::new(secret_key.into().into()),
@@ -35,6 +37,8 @@ impl ScalewayConfig {
         }
     }
 
+    /// Overrides the API base URL, e.g. to target a mock server. It must use
+    /// `https://` (`http://` is accepted for `localhost` only).
     pub fn with_api_base(mut self, api_base: impl Into<String>) -> Result<Self, DnsError> {
         let base = api_base.into();
         validate_https_base(&base, PROVIDER)?;
@@ -53,6 +57,7 @@ impl ScalewayConfig {
     }
 }
 
+/// [`DnsProvider`] backed by the Scaleway API.
 pub struct ScalewayProvider {
     config: ScalewayConfig,
     http: reqwest::Client,
@@ -60,6 +65,7 @@ pub struct ScalewayProvider {
 }
 
 impl ScalewayProvider {
+    /// Builds the provider and its HTTP client.
     pub fn new(config: ScalewayConfig) -> Result<Self, DnsError> {
         let http = reqwest::Client::builder()
             .timeout(HTTP_TIMEOUT)
@@ -73,6 +79,7 @@ impl ScalewayProvider {
         })
     }
 
+    /// Builds the provider from `SCW_SECRET_KEY`.
     pub fn from_env() -> Result<Self, DnsError> {
         let key = env::var(ENV_SECRET_KEY)
             .map_err(|_| DnsError::MissingCredentials(ENV_SECRET_KEY.into()))?;

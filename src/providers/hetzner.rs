@@ -33,6 +33,8 @@ pub struct HetznerConfig {
 }
 
 impl HetznerConfig {
+    /// Uses an API token of the Hetzner Console project holding the zone, with
+    /// read and write permission.
     pub fn new(api_token: impl Into<String>) -> Self {
         Self {
             token: SecretString::new(api_token.into().into()),
@@ -41,6 +43,8 @@ impl HetznerConfig {
         }
     }
 
+    /// Overrides the API base URL, e.g. to target a mock server. It must use
+    /// `https://` (`http://` is accepted for `localhost` only).
     pub fn with_api_base(mut self, api_base: impl Into<String>) -> Result<Self, DnsError> {
         let base = api_base.into();
         validate_https_base(&base, PROVIDER)?;
@@ -58,6 +62,7 @@ impl HetznerConfig {
     }
 }
 
+/// [`DnsProvider`] backed by the Hetzner API.
 pub struct HetznerProvider {
     config: HetznerConfig,
     http: reqwest::Client,
@@ -65,6 +70,7 @@ pub struct HetznerProvider {
 }
 
 impl HetznerProvider {
+    /// Builds the provider and its HTTP client.
     pub fn new(config: HetznerConfig) -> Result<Self, DnsError> {
         let http = reqwest::Client::builder()
             .timeout(HTTP_TIMEOUT)
@@ -78,6 +84,7 @@ impl HetznerProvider {
         })
     }
 
+    /// Builds the provider from `HETZNER_API_TOKEN`.
     pub fn from_env() -> Result<Self, DnsError> {
         let token =
             env::var(ENV_TOKEN).map_err(|_| DnsError::MissingCredentials(ENV_TOKEN.into()))?;

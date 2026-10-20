@@ -61,6 +61,7 @@ pub struct Dns01Solver<P: DnsProvider + 'static> {
 }
 
 impl<P: DnsProvider + 'static> Dns01Solver<P> {
+    /// Solve with `provider`, using the default public resolvers as fallback.
     pub fn new(provider: P) -> Self {
         Self {
             provider: Arc::new(provider),
@@ -73,11 +74,14 @@ impl<P: DnsProvider + 'static> Dns01Solver<P> {
         }
     }
 
+    /// Resolvers (`ip:port`) polled when the zone's authoritative nameservers
+    /// cannot be found.
     pub fn with_resolvers(mut self, resolvers: Vec<impl Into<String>>) -> Self {
         self.fallback_resolvers = resolvers.into_iter().map(Into::into).collect();
         self
     }
 
+    /// Overrides the provider's propagation timeout.
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timing
             .get_or_insert_with(PropagationTiming::default)
@@ -85,6 +89,7 @@ impl<P: DnsProvider + 'static> Dns01Solver<P> {
         self
     }
 
+    /// Overrides the provider's propagation polling interval.
     pub fn with_interval(mut self, interval: Duration) -> Self {
         self.timing
             .get_or_insert_with(PropagationTiming::default)

@@ -3,14 +3,20 @@
 //!
 //! See [the README](https://github.com/kemeter/cheti) for usage examples.
 #![doc = include_str!("../README.md")]
+#![warn(missing_docs)]
 
 pub mod account_store;
 mod cleanup;
+/// Zone lookup and propagation polling.
 pub mod dns;
+/// The error type shared by every part of the crate.
 pub mod error;
+/// The [`DnsProvider`] trait implemented by every DNS backend.
 pub mod provider;
+/// Built-in DNS providers.
 pub mod providers;
 pub mod renewal;
+/// The DNS-01 solver driving an ACME order to a certificate.
 pub mod solver;
 #[cfg(feature = "testing")]
 pub mod testing;

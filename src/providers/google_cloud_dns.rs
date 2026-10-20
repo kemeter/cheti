@@ -102,6 +102,8 @@ impl GoogleCloudDnsConfig {
         Self::from_service_account_json(&json)
     }
 
+    /// Overrides the API base URL, e.g. to target a mock server. It must use
+    /// `https://` (`http://` is accepted for `localhost` only).
     pub fn with_api_base(mut self, api_base: impl Into<String>) -> Result<Self, DnsError> {
         let base = api_base.into();
         validate_https_base(&base, PROVIDER)?;
@@ -168,6 +170,7 @@ fn validate_project(project: &str) -> Result<(), DnsError> {
     Ok(())
 }
 
+/// [`DnsProvider`] backed by the Google Cloud DNS API.
 pub struct GoogleCloudDnsProvider {
     config: GoogleCloudDnsConfig,
     key: RsaKeyPair,
@@ -183,6 +186,8 @@ struct CachedToken {
 }
 
 impl GoogleCloudDnsProvider {
+    /// Builds the provider, parsing the service account private key. Fails if
+    /// the key is not an RSA PKCS#8 key or no project id is known.
     pub fn new(config: GoogleCloudDnsConfig) -> Result<Self, DnsError> {
         if config.project.is_empty() {
             return Err(DnsError::MissingCredentials(format!(

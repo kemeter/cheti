@@ -20,6 +20,7 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const PROVIDER: &str = "gandi";
 
+/// Configuration for the Gandi provider.
 pub struct GandiConfig {
     personal_access_token: SecretString,
     api_base: String,
@@ -27,6 +28,7 @@ pub struct GandiConfig {
 }
 
 impl GandiConfig {
+    /// Uses a Gandi personal access token with DNS scope on the domains.
     pub fn new(personal_access_token: impl Into<String>) -> Self {
         Self {
             personal_access_token: SecretString::new(personal_access_token.into().into()),
@@ -35,6 +37,8 @@ impl GandiConfig {
         }
     }
 
+    /// Overrides the API base URL, e.g. to target a mock server. It must use
+    /// `https://` (`http://` is accepted for `localhost` only).
     pub fn with_api_base(mut self, api_base: impl Into<String>) -> Result<Self, DnsError> {
         let base = api_base.into();
         validate_https_base(&base, PROVIDER)?;
@@ -53,6 +57,7 @@ impl GandiConfig {
     }
 }
 
+/// [`DnsProvider`] backed by the Gandi API.
 pub struct GandiProvider {
     config: GandiConfig,
     http: reqwest::Client,
@@ -60,6 +65,7 @@ pub struct GandiProvider {
 }
 
 impl GandiProvider {
+    /// Builds the provider and its HTTP client.
     pub fn new(config: GandiConfig) -> Result<Self, DnsError> {
         let http = reqwest::Client::builder()
             .timeout(HTTP_TIMEOUT)
@@ -73,6 +79,7 @@ impl GandiProvider {
         })
     }
 
+    /// Builds the provider from `GANDIV5_PERSONAL_ACCESS_TOKEN`.
     pub fn from_env() -> Result<Self, DnsError> {
         let token =
             env::var(ENV_TOKEN).map_err(|_| DnsError::MissingCredentials(ENV_TOKEN.into()))?;

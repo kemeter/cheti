@@ -25,6 +25,7 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const PROVIDER: &str = "digitalocean";
 
+/// Configuration for the DigitalOcean provider.
 pub struct DigitalOceanConfig {
     token: SecretString,
     api_base: String,
@@ -32,6 +33,7 @@ pub struct DigitalOceanConfig {
 }
 
 impl DigitalOceanConfig {
+    /// Uses a personal access token with read and write access to domains.
     pub fn new(token: impl Into<String>) -> Self {
         Self {
             token: SecretString::new(token.into().into()),
@@ -40,6 +42,8 @@ impl DigitalOceanConfig {
         }
     }
 
+    /// Overrides the API base URL, e.g. to target a mock server. It must use
+    /// `https://` (`http://` is accepted for `localhost` only).
     pub fn with_api_base(mut self, api_base: impl Into<String>) -> Result<Self, DnsError> {
         let base = api_base.into();
         validate_https_base(&base, PROVIDER)?;
@@ -57,6 +61,7 @@ impl DigitalOceanConfig {
     }
 }
 
+/// [`DnsProvider`] backed by the DigitalOcean API.
 pub struct DigitalOceanProvider {
     config: DigitalOceanConfig,
     http: reqwest::Client,
@@ -64,6 +69,7 @@ pub struct DigitalOceanProvider {
 }
 
 impl DigitalOceanProvider {
+    /// Builds the provider and its HTTP client.
     pub fn new(config: DigitalOceanConfig) -> Result<Self, DnsError> {
         let http = reqwest::Client::builder()
             .timeout(HTTP_TIMEOUT)
@@ -77,6 +83,7 @@ impl DigitalOceanProvider {
         })
     }
 
+    /// Builds the provider from `DIGITALOCEAN_TOKEN`.
     pub fn from_env() -> Result<Self, DnsError> {
         let token =
             env::var(ENV_TOKEN).map_err(|_| DnsError::MissingCredentials(ENV_TOKEN.into()))?;

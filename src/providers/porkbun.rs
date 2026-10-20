@@ -40,6 +40,7 @@ const AUTH_CODES: &[&str] = &[
     "DOMAIN_NOT_ALLOWED",
 ];
 
+/// Configuration for the Porkbun provider.
 pub struct PorkbunConfig {
     api_key: SecretString,
     secret_api_key: SecretString,
@@ -48,6 +49,8 @@ pub struct PorkbunConfig {
 }
 
 impl PorkbunConfig {
+    /// Uses the account API key and secret API key. API access must also be
+    /// enabled on each domain.
     pub fn new(api_key: impl Into<String>, secret_api_key: impl Into<String>) -> Self {
         Self {
             api_key: SecretString::new(api_key.into().into()),
@@ -57,6 +60,8 @@ impl PorkbunConfig {
         }
     }
 
+    /// Overrides the API base URL, e.g. to target a mock server. It must use
+    /// `https://` (`http://` is accepted for `localhost` only).
     pub fn with_api_base(mut self, api_base: impl Into<String>) -> Result<Self, DnsError> {
         let base = api_base.into();
         validate_https_base(&base, PROVIDER)?;
@@ -74,6 +79,7 @@ impl PorkbunConfig {
     }
 }
 
+/// [`DnsProvider`] backed by the Porkbun API.
 pub struct PorkbunProvider {
     config: PorkbunConfig,
     http: reqwest::Client,
@@ -81,6 +87,7 @@ pub struct PorkbunProvider {
 }
 
 impl PorkbunProvider {
+    /// Builds the provider and its HTTP client.
     pub fn new(config: PorkbunConfig) -> Result<Self, DnsError> {
         let http = reqwest::Client::builder()
             .timeout(HTTP_TIMEOUT)
@@ -94,6 +101,7 @@ impl PorkbunProvider {
         })
     }
 
+    /// Builds the provider from `PORKBUN_API_KEY` and `PORKBUN_SECRET_API_KEY`.
     pub fn from_env() -> Result<Self, DnsError> {
         let api_key =
             env::var(ENV_API_KEY).map_err(|_| DnsError::MissingCredentials(ENV_API_KEY.into()))?;

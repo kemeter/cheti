@@ -42,9 +42,12 @@ const PROVIDER: &str = "rfc2136";
 /// declared with on the server.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TsigAlgorithm {
+    /// `hmac-sha256`, the default.
     #[default]
     HmacSha256,
+    /// `hmac-sha384`.
     HmacSha384,
+    /// `hmac-sha512`.
     HmacSha512,
 }
 
@@ -94,6 +97,8 @@ impl FromStr for TsigAlgorithm {
     }
 }
 
+/// Configuration for the RFC 2136 provider: the primary nameserver accepting
+/// dynamic updates, and the TSIG key signing them.
 pub struct Rfc2136Config {
     nameserver: String,
     key_name: String,
@@ -339,6 +344,7 @@ fn unix_now() -> Result<u64, DnsError> {
         .map_err(|_| DnsError::Other("system clock is before the Unix epoch".into()))
 }
 
+/// [`DnsProvider`] backed by the RFC 2136 API.
 pub struct Rfc2136Provider {
     config: Rfc2136Config,
     nameserver: Nameserver,
@@ -346,6 +352,8 @@ pub struct Rfc2136Provider {
 }
 
 impl Rfc2136Provider {
+    /// Builds the provider, checking the nameserver address, the key name and
+    /// the base64 secret up front.
     pub fn new(config: Rfc2136Config) -> Result<Self, DnsError> {
         let nameserver = parse_nameserver(&config.nameserver)?;
         let key_name = parse_name(&config.key_name, "TSIG key name")?;

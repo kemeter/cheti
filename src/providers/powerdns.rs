@@ -78,6 +78,7 @@ impl PowerDnsConfig {
     }
 }
 
+/// [`DnsProvider`] backed by the PowerDNS API.
 pub struct PowerDnsProvider {
     config: PowerDnsConfig,
     http: reqwest::Client,
@@ -88,6 +89,7 @@ pub struct PowerDnsProvider {
 }
 
 impl PowerDnsProvider {
+    /// Builds the provider and its HTTP client.
     pub fn new(config: PowerDnsConfig) -> Result<Self, DnsError> {
         let http = reqwest::Client::builder()
             .timeout(HTTP_TIMEOUT)
@@ -102,6 +104,8 @@ impl PowerDnsProvider {
         })
     }
 
+    /// Builds the provider from `POWERDNS_API_URL`, `POWERDNS_API_KEY` and, optionally,
+    /// `POWERDNS_SERVER_ID`.
     pub fn from_env() -> Result<Self, DnsError> {
         let api_url =
             env::var(ENV_API_URL).map_err(|_| DnsError::MissingCredentials(ENV_API_URL.into()))?;
