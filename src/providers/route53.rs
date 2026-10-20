@@ -14,8 +14,8 @@ use url::Url;
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
-    truncate_error_body, validate_acme_value, validate_fqdn, validate_https_base, KeyedMutex,
-    SendRetrying,
+    retry_backoff, truncate_error_body, validate_acme_value, validate_fqdn, validate_https_base,
+    KeyedMutex, SendRetrying, MAX_ATTEMPTS,
 };
 
 const ROUTE53_API_BASE: &str = "https://route53.amazonaws.com/2013-04-01";
@@ -171,6 +171,32 @@ impl Route53Provider {
             .map_err(|e| DnsError::Other(format!("{PROVIDER} invalid request URL: {e}")))?;
 
         let payload = body.unwrap_or_default();
+        let mut attempt = 1;
+        loop {
+            let (status, text) = self.send_signed(&method, &url, &payload).await?;
+            if status.is_success() {
+                return Ok(text);
+            }
+            // Route53 reports throttling as a 400 with an error code, which the
+            // generic retry (status based) does not see. A throttled request
+            // was rejected unprocessed, so even a change batch can be resent.
+            if attempt < MAX_ATTEMPTS && is_throttled(&text) {
+                tokio::time::sleep(retry_backoff(attempt)).await;
+                attempt += 1;
+                continue;
+            }
+            return Err(map_error(method.as_str(), path, status, &text));
+        }
+    }
+
+    /// Signs (with the current time) and sends one request, returning the
+    /// status and body.
+    async fn send_signed(
+        &self,
+        method: &reqwest::Method,
+        url: &Url,
+        payload: &str,
+    ) -> Result<(reqwest::StatusCode, String), DnsError> {
         let credentials = SigningCredentials {
             access_key_id: &self.config.access_key_id,
             secret_access_key: self.config.secret_access_key.expose_secret(),
@@ -187,28 +213,25 @@ impl Route53Provider {
                 service: SIGNING_SERVICE,
             },
             method.as_str(),
-            &url,
+            url,
             payload.as_bytes(),
             &amz_date_now(),
         );
 
-        let mut request = self.http.request(method.clone(), url);
+        let mut request = self.http.request(method.clone(), url.clone());
         for (name, value) in headers {
             request = request.header(name, value);
         }
         if !payload.is_empty() {
             request = request
                 .header(reqwest::header::CONTENT_TYPE, "application/xml")
-                .body(payload);
+                .body(payload.to_string());
         }
 
         let response = request.send_retrying().await?;
         let status = response.status();
         let text = response.text().await?;
-        if !status.is_success() {
-            return Err(map_error(method.as_str(), path, status, &text));
-        }
-        Ok(text)
+        Ok((status, text))
     }
 
     /// Finds the hosted zone owning `fqdn`: the configured override, or the
@@ -437,6 +460,12 @@ fn parse_xml<T: for<'de> Deserialize<'de>>(
             "{PROVIDER} {method} {path} returned an unexpected body: {e}"
         ))
     })
+}
+
+/// Whether an error document carries one of the throttling codes.
+fn is_throttled(text: &str) -> bool {
+    quick_xml::de::from_str::<ErrorResponse>(text)
+        .is_ok_and(|err| THROTTLING_CODES.contains(&err.error.code.as_str()))
 }
 
 /// Maps a failed response to a `DnsError` from its XML error document:
