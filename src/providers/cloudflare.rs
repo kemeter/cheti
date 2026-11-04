@@ -12,7 +12,7 @@ use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
     api_error, encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
-    validate_ttl, validate_zone, KeyedMutex, SendRetrying,
+    validate_ttl_range, validate_zone, KeyedMutex, SendRetrying,
 };
 
 const CF_API_BASE: &str = "https://api.cloudflare.com/client/v4";
@@ -87,8 +87,14 @@ impl CloudflareConfig {
     }
 
     /// TTL of the TXT records `present` creates. Defaults to 60 seconds.
+    /// Cloudflare accepts `1` (automatic), or 60 to 86 400 seconds (30 on
+    /// Enterprise zones).
     pub fn with_ttl(mut self, ttl: u32) -> Result<Self, DnsError> {
-        self.ttl = validate_ttl(ttl)?;
+        self.ttl = if ttl == 1 {
+            ttl
+        } else {
+            validate_ttl_range(ttl, 30, 86_400)?
+        };
         Ok(self)
     }
 

@@ -398,7 +398,7 @@ async fn present_uses_the_configured_ttl() {
         .and(path(RECORD_PATH))
         .respond_with(move |req: &Request| {
             let body: Value = serde_json::from_slice(&req.body).unwrap();
-            assert_eq!(body["rrset_ttl"], 120);
+            assert_eq!(body["rrset_ttl"], 600);
             ResponseTemplate::new(201)
         })
         .expect(1)
@@ -410,8 +410,15 @@ async fn present_uses_the_configured_ttl() {
         .unwrap()
         .with_zone(ZONE)
         .unwrap()
-        .with_ttl(120)
+        .with_ttl(600)
         .unwrap();
     let provider = GandiProvider::new(config).unwrap();
     provider.present(FQDN, VALUE).await.unwrap();
+}
+
+#[test]
+fn a_ttl_outside_gandi_range_is_refused() {
+    assert!(GandiConfig::new("test-token").with_ttl(299).is_err());
+    assert!(GandiConfig::new("test-token").with_ttl(2_592_001).is_err());
+    assert!(GandiConfig::new("test-token").with_ttl(300).is_ok());
 }

@@ -10,7 +10,7 @@ use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
     api_error, encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
-    validate_ttl, validate_zone, KeyedMutex, SendRetrying,
+    validate_ttl_range, validate_zone, KeyedMutex, SendRetrying,
 };
 
 const GANDI_API_BASE: &str = "https://api.gandi.net/v5";
@@ -61,8 +61,9 @@ impl GandiConfig {
     }
 
     /// TTL of the TXT records `present` creates. Defaults to 300 seconds.
+    /// Gandi accepts 300 to 2 592 000 seconds.
     pub fn with_ttl(mut self, ttl: u32) -> Result<Self, DnsError> {
-        self.ttl = validate_ttl(ttl)?;
+        self.ttl = validate_ttl_range(ttl, 300, 2_592_000)?;
         Ok(self)
     }
 

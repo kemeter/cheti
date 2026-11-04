@@ -13,7 +13,9 @@ project follows [Semantic Versioning](https://semver.org/).
   were previously ignored without a trace.
 - `with_ttl` and `with_timeout` on every HTTP provider config, setting the
   TTL of the TXT records `present` creates and the timeout of each API
-  request, as `Rfc2136Config` already allowed.
+  request, as `Rfc2136Config` already allowed. `with_ttl` refuses a TTL
+  outside the range the provider's API documents (Cloudflare, deSEC,
+  DigitalOcean, Gandi, Hetzner, Infomaniak).
 
 ## [0.1.0] - 2026-10-20
 

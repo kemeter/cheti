@@ -9,7 +9,7 @@ use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
     api_error, encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
-    validate_ttl, validate_zone, KeyedMutex, SendRetrying,
+    validate_ttl_range, validate_zone, KeyedMutex, SendRetrying,
 };
 
 const HETZNER_API_BASE: &str = "https://api.hetzner.cloud/v1";
@@ -67,8 +67,9 @@ impl HetznerConfig {
 
     /// TTL of the TXT records `present` creates. Defaults to 60 seconds. 60s is
     /// the lowest value the API accepts. An existing RRSet keeps its own TTL.
+    /// Hetzner accepts 60 seconds or more.
     pub fn with_ttl(mut self, ttl: u32) -> Result<Self, DnsError> {
-        self.ttl = validate_ttl(ttl)?;
+        self.ttl = validate_ttl_range(ttl, 60, i32::MAX as u32)?;
         Ok(self)
     }
 

@@ -194,9 +194,14 @@ pub(crate) fn validate_zone(zone: &str) -> Result<(), DnsError> {
 const MAX_TTL: u32 = i32::MAX as u32;
 
 pub(crate) fn validate_ttl(ttl: u32) -> Result<u32, DnsError> {
-    if ttl > MAX_TTL {
+    validate_ttl_range(ttl, 0, MAX_TTL)
+}
+
+/// For a provider whose API documents a narrower range than RFC 2181.
+pub(crate) fn validate_ttl_range(ttl: u32, min: u32, max: u32) -> Result<u32, DnsError> {
+    if !(min..=max).contains(&ttl) {
         return Err(DnsError::Other(format!(
-            "TTL must be at most {MAX_TTL}, got {ttl}"
+            "TTL must be between {min} and {max}, got {ttl}"
         )));
     }
     Ok(ttl)
@@ -294,6 +299,14 @@ mod tests {
         assert_eq!(validate_ttl(0).unwrap(), 0);
         assert_eq!(validate_ttl(i32::MAX as u32).unwrap(), i32::MAX as u32);
         assert!(validate_ttl(i32::MAX as u32 + 1).is_err());
+    }
+
+    #[test]
+    fn validate_ttl_range_is_inclusive() {
+        assert_eq!(validate_ttl_range(60, 60, 86_400).unwrap(), 60);
+        assert_eq!(validate_ttl_range(86_400, 60, 86_400).unwrap(), 86_400);
+        assert!(validate_ttl_range(59, 60, 86_400).is_err());
+        assert!(validate_ttl_range(86_401, 60, 86_400).is_err());
     }
 
     #[test]

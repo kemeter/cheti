@@ -523,3 +523,12 @@ async fn present_uses_the_configured_ttl() {
     let provider = InfomaniakProvider::new(config).unwrap();
     provider.present(FQDN, VALUE).await.unwrap();
 }
+
+#[test]
+fn a_ttl_outside_infomaniak_range_is_refused() {
+    assert!(InfomaniakConfig::new("test-token").with_ttl(0).is_err());
+    assert!(InfomaniakConfig::new("test-token")
+        .with_ttl(86_401)
+        .is_err());
+    assert!(InfomaniakConfig::new("test-token").with_ttl(60).is_ok());
+}

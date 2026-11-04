@@ -11,7 +11,7 @@ use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
     api_error, encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
-    validate_ttl, validate_zone, KeyedMutex, SendRetrying,
+    validate_ttl_range, validate_zone, KeyedMutex, SendRetrying,
 };
 
 const INFOMANIAK_API_BASE: &str = "https://api.infomaniak.com";
@@ -70,8 +70,9 @@ impl InfomaniakConfig {
 
     /// TTL of the TXT records `present` creates. Defaults to 300 seconds. The
     /// API accepts TTLs between 60 and 86400 seconds.
+    /// Infomaniak accepts 60 to 86 400 seconds.
     pub fn with_ttl(mut self, ttl: u32) -> Result<Self, DnsError> {
-        self.ttl = validate_ttl(ttl)?;
+        self.ttl = validate_ttl_range(ttl, 60, 86_400)?;
         Ok(self)
     }
 

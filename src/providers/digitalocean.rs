@@ -10,7 +10,7 @@ use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
     api_error, encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
-    validate_ttl, validate_zone, KeyedMutex, SendRetrying,
+    validate_ttl_range, validate_zone, KeyedMutex, SendRetrying,
 };
 
 const DO_API_BASE: &str = "https://api.digitalocean.com/v2";
@@ -66,8 +66,9 @@ impl DigitalOceanConfig {
 
     /// TTL of the TXT records `present` creates. Defaults to 30 seconds.
     /// DigitalOcean rejects TTLs below 30 seconds.
+    /// DigitalOcean accepts 30 seconds or more.
     pub fn with_ttl(mut self, ttl: u32) -> Result<Self, DnsError> {
-        self.ttl = validate_ttl(ttl)?;
+        self.ttl = validate_ttl_range(ttl, 30, i32::MAX as u32)?;
         Ok(self)
     }
 
