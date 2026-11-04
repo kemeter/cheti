@@ -553,3 +553,28 @@ async fn concurrent_present_calls_are_serialized() {
     assert!(final_state.contains(&format!("\"{VALUE}\"")));
     assert!(final_state.contains(&format!("\"{OTHER_VALUE}\"")));
 }
+
+#[tokio::test]
+async fn present_uses_the_configured_ttl() {
+    let server = MockServer::start().await;
+    mount_rrset_get(&server, rrset_lookup(vec![])).await;
+
+    Mock::given(method("PATCH"))
+        .and(path(ZONE_PATH))
+        .respond_with(move |req: &Request| {
+            assert_eq!(patched_rrset(req)["ttl"], 120);
+            ResponseTemplate::new(204)
+        })
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let config = PowerDnsConfig::new(server.uri(), API_KEY)
+        .unwrap()
+        .with_zone(ZONE)
+        .unwrap()
+        .with_ttl(120)
+        .unwrap();
+    let provider = PowerDnsProvider::new(config).unwrap();
+    provider.present(FQDN, VALUE).await.unwrap();
+}

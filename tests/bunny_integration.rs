@@ -626,3 +626,35 @@ async fn fqdn_outside_override_zone_is_rejected() {
         .unwrap_err();
     assert!(err.to_string().contains("not within zone"), "{err}");
 }
+
+#[tokio::test]
+async fn present_uses_the_configured_ttl() {
+    let server = MockServer::start().await;
+    mount_zone_list(&server).await;
+    mount_zone(&server, vec![]).await;
+
+    Mock::given(method("PUT"))
+        .and(path(RECORDS_PATH))
+        .and(body_json(json!({
+            "Type": 3,
+            "Ttl": 120,
+            "Value": VALUE,
+            "Name": "_acme-challenge"
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(txt_record(
+            1,
+            "_acme-challenge",
+            VALUE,
+        )))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let config = BunnyConfig::new("test-key")
+        .with_api_base(server.uri())
+        .unwrap()
+        .with_ttl(120)
+        .unwrap();
+    let provider = BunnyProvider::new(config).unwrap();
+    provider.present(FQDN, VALUE).await.unwrap();
+}

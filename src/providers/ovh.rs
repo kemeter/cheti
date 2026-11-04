@@ -12,7 +12,7 @@ use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
     api_error, encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
-    validate_zone, KeyedMutex, SendRetrying,
+    validate_ttl, validate_zone, KeyedMutex, SendRetrying,
 };
 
 const OVH_EU_API_BASE: &str = "https://eu.api.ovh.com/1.0";
@@ -31,6 +31,8 @@ pub struct OvhConfig {
     consumer_key: SecretString,
     api_base: String,
     zone_override: Option<String>,
+    ttl: u32,
+    timeout: Duration,
 }
 
 impl OvhConfig {
@@ -47,6 +49,8 @@ impl OvhConfig {
             consumer_key: SecretString::new(consumer_key.into().into()),
             api_base: OVH_EU_API_BASE.to_string(),
             zone_override: None,
+            ttl: DEFAULT_TTL,
+            timeout: HTTP_TIMEOUT,
         }
     }
 
@@ -68,6 +72,18 @@ impl OvhConfig {
         self.zone_override = Some(zone.trim_end_matches('.').to_ascii_lowercase());
         Ok(self)
     }
+
+    /// TTL of the TXT records `present` creates. Defaults to 60 seconds.
+    pub fn with_ttl(mut self, ttl: u32) -> Result<Self, DnsError> {
+        self.ttl = validate_ttl(ttl)?;
+        Ok(self)
+    }
+
+    /// Upper bound for one HTTP request to the API. Defaults to 30 seconds.
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
 }
 
 /// [`DnsProvider`] backed by the OVH API.
@@ -85,7 +101,7 @@ impl OvhProvider {
     /// Builds the provider and its HTTP client.
     pub fn new(config: OvhConfig) -> Result<Self, DnsError> {
         let http = reqwest::Client::builder()
-            .timeout(HTTP_TIMEOUT)
+            .timeout(config.timeout)
             .connect_timeout(CONNECT_TIMEOUT)
             .build()
             .map_err(DnsError::Http)?;
@@ -280,7 +296,7 @@ impl OvhProvider {
             field_type: "TXT",
             sub_domain,
             target,
-            ttl: DEFAULT_TTL,
+            ttl: self.config.ttl,
         })
         .map_err(|e| DnsError::Other(format!("serialize ovh create body: {e}")))?;
         let response = self

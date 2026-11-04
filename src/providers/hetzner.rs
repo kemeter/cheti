@@ -9,7 +9,7 @@ use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
     api_error, encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
-    validate_zone, KeyedMutex, SendRetrying,
+    validate_ttl_range, validate_zone, KeyedMutex, SendRetrying,
 };
 
 const HETZNER_API_BASE: &str = "https://api.hetzner.cloud/v1";
@@ -30,6 +30,8 @@ pub struct HetznerConfig {
     token: SecretString,
     api_base: String,
     zone_override: Option<String>,
+    ttl: u32,
+    timeout: Duration,
 }
 
 impl HetznerConfig {
@@ -40,6 +42,8 @@ impl HetznerConfig {
             token: SecretString::new(api_token.into().into()),
             api_base: HETZNER_API_BASE.to_string(),
             zone_override: None,
+            ttl: DEFAULT_TTL,
+            timeout: HTTP_TIMEOUT,
         }
     }
 
@@ -60,6 +64,20 @@ impl HetznerConfig {
         self.zone_override = Some(zone.trim_end_matches('.').to_ascii_lowercase());
         Ok(self)
     }
+
+    /// TTL of the TXT records `present` creates. Defaults to 60 seconds. 60s is
+    /// the lowest value the API accepts. An existing RRSet keeps its own TTL.
+    /// Hetzner accepts 60 seconds or more.
+    pub fn with_ttl(mut self, ttl: u32) -> Result<Self, DnsError> {
+        self.ttl = validate_ttl_range(ttl, 60, i32::MAX as u32)?;
+        Ok(self)
+    }
+
+    /// Upper bound for one HTTP request to the API. Defaults to 30 seconds.
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
 }
 
 /// [`DnsProvider`] backed by the Hetzner API.
@@ -73,7 +91,7 @@ impl HetznerProvider {
     /// Builds the provider and its HTTP client.
     pub fn new(config: HetznerConfig) -> Result<Self, DnsError> {
         let http = reqwest::Client::builder()
-            .timeout(HTTP_TIMEOUT)
+            .timeout(config.timeout)
             .connect_timeout(CONNECT_TIMEOUT)
             .build()
             .map_err(DnsError::Http)?;
@@ -374,7 +392,7 @@ impl DnsProvider for HetznerProvider {
                 }
                 None
             }
-            None => Some(DEFAULT_TTL),
+            None => Some(self.config.ttl),
         };
         self.run_records_action(&zone, &rname, "add_records", value, ttl)
             .await

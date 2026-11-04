@@ -9,13 +9,13 @@ use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
     api_error, encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
-    validate_zone, KeyedMutex, SendRetrying,
+    validate_ttl_range, validate_zone, KeyedMutex, SendRetrying,
 };
 
 const DESEC_API_BASE: &str = "https://desec.io/api/v1";
 const ENV_TOKEN: &str = "DESEC_TOKEN";
 /// deSEC rejects TTLs below the domain's `minimum_ttl`, which is 3600 for
-/// most accounts. Used as a floor when the domain does not report a higher one.
+/// most accounts.
 const DEFAULT_TTL: u32 = 3600;
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -26,6 +26,8 @@ pub struct DesecConfig {
     token: SecretString,
     api_base: String,
     zone_override: Option<String>,
+    ttl: u32,
+    timeout: Duration,
 }
 
 impl DesecConfig {
@@ -35,6 +37,8 @@ impl DesecConfig {
             token: SecretString::new(token.into().into()),
             api_base: DESEC_API_BASE.to_string(),
             zone_override: None,
+            ttl: DEFAULT_TTL,
+            timeout: HTTP_TIMEOUT,
         }
     }
 
@@ -56,6 +60,20 @@ impl DesecConfig {
         self.zone_override = Some(zone.trim_end_matches('.').to_ascii_lowercase());
         Ok(self)
     }
+
+    /// TTL of the TXT records `present` creates. Defaults to 3600 seconds.
+    /// Raised to the domain's `minimum_ttl` when below it.
+    /// deSEC accepts up to 86 400 seconds.
+    pub fn with_ttl(mut self, ttl: u32) -> Result<Self, DnsError> {
+        self.ttl = validate_ttl_range(ttl, 0, 86_400)?;
+        Ok(self)
+    }
+
+    /// Upper bound for one HTTP request to the API. Defaults to 30 seconds.
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
 }
 
 /// [`DnsProvider`] backed by the deSEC API.
@@ -75,7 +93,7 @@ impl DesecProvider {
     /// Builds the provider and its HTTP client.
     pub fn new(config: DesecConfig) -> Result<Self, DnsError> {
         let http = reqwest::Client::builder()
-            .timeout(HTTP_TIMEOUT)
+            .timeout(config.timeout)
             .connect_timeout(CONNECT_TIMEOUT)
             .build()
             .map_err(DnsError::Http)?;
@@ -148,7 +166,7 @@ impl DesecProvider {
             .next()
             .ok_or_else(|| DnsError::ZoneNotFound(fqdn.to_string()))?;
         validate_zone(&domain.name)?;
-        Ok(domain.into_resolved())
+        Ok(domain.into_resolved(self.config.ttl))
     }
 
     /// Reads a known domain, for its `minimum_ttl`: a write below it is
@@ -171,7 +189,7 @@ impl DesecProvider {
         }
 
         let domain: DesecDomain = response.json().await?;
-        Ok(domain.into_resolved())
+        Ok(domain.into_resolved(self.config.ttl))
     }
 
     /// Returns the unquoted TXT values currently in the RRset.
@@ -274,9 +292,11 @@ struct DesecDomain {
 }
 
 impl DesecDomain {
-    fn into_resolved(self) -> ResolvedZone {
+    /// `ttl` is the configured one, raised to the domain's minimum, or to
+    /// deSEC's usual minimum when the domain does not state its own.
+    fn into_resolved(self, ttl: u32) -> ResolvedZone {
         ResolvedZone {
-            ttl: self.minimum_ttl.unwrap_or(DEFAULT_TTL).max(DEFAULT_TTL),
+            ttl: ttl.max(self.minimum_ttl.unwrap_or(DEFAULT_TTL)),
             name: self.name,
         }
     }
@@ -341,6 +361,17 @@ impl DnsProvider for DesecProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_domain_without_minimum_ttl_falls_back_to_the_usual_one() {
+        let domain = |minimum_ttl| DesecDomain {
+            name: "example.com".into(),
+            minimum_ttl,
+        };
+        assert_eq!(domain(None).into_resolved(60).ttl, DEFAULT_TTL);
+        assert_eq!(domain(Some(60)).into_resolved(60).ttl, 60);
+        assert_eq!(domain(Some(60)).into_resolved(7200).ttl, 7200);
+    }
 
     #[test]
     fn with_api_base_rejects_non_https() {

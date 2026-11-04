@@ -423,3 +423,29 @@ async fn present_rejects_fqdn_outside_zone() {
         .await
         .is_err());
 }
+
+#[tokio::test]
+async fn present_uses_the_configured_ttl() {
+    let server = MockServer::start().await;
+    mount_existing(&server, &[]).await;
+
+    Mock::given(method("POST"))
+        .and(path(CREATE_PATH))
+        .respond_with(|req: &Request| {
+            assert_eq!(body_of(req)["ttl"], 900);
+            ResponseTemplate::new(200).set_body_json(json!({ "status": "SUCCESS", "id": "1001" }))
+        })
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let config = PorkbunConfig::new("pk1_test", "sk1_test")
+        .with_api_base(server.uri())
+        .unwrap()
+        .with_zone(ZONE)
+        .unwrap()
+        .with_ttl(900)
+        .unwrap();
+    let provider = PorkbunProvider::new(config).unwrap();
+    provider.present(FQDN, VALUE).await.unwrap();
+}

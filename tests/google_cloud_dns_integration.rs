@@ -852,3 +852,29 @@ async fn unauthorized_drops_the_cached_token() {
     assert!(matches!(first, Err(DnsError::Auth(_))), "got {first:?}");
     provider.cleanup(FQDN, VALUE).await.unwrap();
 }
+
+#[tokio::test]
+async fn present_uses_the_configured_ttl() {
+    let server = MockServer::start().await;
+    mount_token(&server).await;
+    mount_rrset(&server, &[], 0).await;
+
+    Mock::given(method("POST"))
+        .and(path(CHANGES_PATH))
+        .respond_with(|req: &Request| {
+            let body: Value = serde_json::from_slice(&req.body).unwrap();
+            assert_eq!(body["additions"][0]["ttl"], 120, "{body}");
+            change_done(req)
+        })
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let config = build_config(&server)
+        .with_managed_zone(MANAGED_ZONE)
+        .unwrap()
+        .with_ttl(120)
+        .unwrap();
+    let provider = GoogleCloudDnsProvider::new(config).unwrap();
+    provider.present(FQDN, VALUE).await.unwrap();
+}

@@ -308,3 +308,35 @@ async fn concurrent_present_calls_are_serialized() {
     assert!(final_state.contains(&quoted(VALUE)));
     assert!(final_state.contains(&quoted(OTHER_VALUE)));
 }
+
+#[tokio::test]
+async fn present_uses_the_configured_ttl() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path(RECORDS_PATH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "records": [] })))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("PATCH"))
+        .and(path(RECORDS_PATH))
+        .respond_with(move |req: &Request| {
+            let body: Value = serde_json::from_slice(&req.body).unwrap();
+            assert_eq!(set_change_records(&body)[0]["ttl"], 120);
+            ResponseTemplate::new(200)
+        })
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let config = ScalewayConfig::new("test-secret")
+        .with_api_base(server.uri())
+        .unwrap()
+        .with_zone(ZONE)
+        .unwrap()
+        .with_ttl(120)
+        .unwrap();
+    let provider = ScalewayProvider::new(config).unwrap();
+    provider.present(FQDN, VALUE).await.unwrap();
+}

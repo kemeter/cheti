@@ -408,3 +408,47 @@ async fn present_with_zone_honours_minimum_ttl() {
     let provider = DesecProvider::new(config).unwrap();
     provider.present(FQDN, VALUE).await.unwrap();
 }
+
+/// Presents with `ttl` configured on a domain whose minimum is `minimum_ttl`
+/// and asserts the TTL written.
+async fn assert_present_writes_ttl(ttl: u32, minimum_ttl: u32, expected: u32) {
+    let server = MockServer::start().await;
+    mount_domain(&server, minimum_ttl).await;
+
+    Mock::given(method("GET"))
+        .and(path(RRSET_PATH))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("PATCH"))
+        .and(path(BULK_PATH))
+        .respond_with(move |req: &Request| {
+            let body: Value = serde_json::from_slice(&req.body).unwrap();
+            assert_eq!(body[0]["ttl"], expected);
+            ResponseTemplate::new(200).set_body_json(json!([]))
+        })
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let config = DesecConfig::new("test-token")
+        .with_api_base(server.uri())
+        .unwrap()
+        .with_zone(ZONE)
+        .unwrap()
+        .with_ttl(ttl)
+        .unwrap();
+    let provider = DesecProvider::new(config).unwrap();
+    provider.present(FQDN, VALUE).await.unwrap();
+}
+
+#[tokio::test]
+async fn present_uses_the_configured_ttl() {
+    assert_present_writes_ttl(7200, 3600, 7200).await;
+}
+
+#[tokio::test]
+async fn configured_ttl_below_the_domain_minimum_is_raised() {
+    assert_present_writes_ttl(60, 3600, 3600).await;
+}

@@ -18,8 +18,8 @@ use tokio::time::Instant;
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
-    api_error, encode_path, validate_acme_value, validate_fqdn, validate_https_base, KeyedMutex,
-    SendRetrying,
+    api_error, encode_path, validate_acme_value, validate_fqdn, validate_https_base, validate_ttl,
+    KeyedMutex, SendRetrying,
 };
 
 const GCDNS_API_BASE: &str = "https://dns.googleapis.com/dns/v1";
@@ -55,6 +55,8 @@ pub struct GoogleCloudDnsConfig {
     project: String,
     api_base: String,
     managed_zone: Option<String>,
+    ttl: u32,
+    timeout: Duration,
 }
 
 impl GoogleCloudDnsConfig {
@@ -87,6 +89,8 @@ impl GoogleCloudDnsConfig {
             project,
             api_base: GCDNS_API_BASE.to_string(),
             managed_zone: None,
+            ttl: DEFAULT_TTL,
+            timeout: HTTP_TIMEOUT,
         })
     }
 
@@ -138,6 +142,19 @@ impl GoogleCloudDnsConfig {
         }
         self.managed_zone = Some(name);
         Ok(self)
+    }
+
+    /// TTL of the TXT records `present` creates. Defaults to 60 seconds. An
+    /// existing RRSet keeps its own TTL.
+    pub fn with_ttl(mut self, ttl: u32) -> Result<Self, DnsError> {
+        self.ttl = validate_ttl(ttl)?;
+        Ok(self)
+    }
+
+    /// Upper bound for one HTTP request to the API. Defaults to 30 seconds.
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
     }
 }
 
@@ -206,7 +223,7 @@ impl GoogleCloudDnsProvider {
             ))
         })?;
         let http = reqwest::Client::builder()
-            .timeout(HTTP_TIMEOUT)
+            .timeout(config.timeout)
             .connect_timeout(CONNECT_TIMEOUT)
             .build()
             .map_err(DnsError::Http)?;
@@ -628,9 +645,9 @@ impl DnsProvider for GoogleCloudDnsProvider {
         let (mut values, ttl) = match &existing {
             Some(rrset) => (
                 rrdatas(rrset),
-                rrset["ttl"].as_u64().unwrap_or(u64::from(DEFAULT_TTL)),
+                rrset["ttl"].as_u64().unwrap_or(u64::from(self.config.ttl)),
             ),
-            None => (Vec::new(), u64::from(DEFAULT_TTL)),
+            None => (Vec::new(), u64::from(self.config.ttl)),
         };
         if values.iter().any(|v| unquote(v) == value) {
             return Ok(());
@@ -667,7 +684,9 @@ impl DnsProvider for GoogleCloudDnsProvider {
         let addition = (!remaining.is_empty()).then(|| Rrset {
             name,
             kind: "TXT",
-            ttl: existing["ttl"].as_u64().unwrap_or(u64::from(DEFAULT_TTL)),
+            ttl: existing["ttl"]
+                .as_u64()
+                .unwrap_or(u64::from(self.config.ttl)),
             rrdatas: remaining,
         });
         self.apply_change(&zone, Some(existing), addition).await

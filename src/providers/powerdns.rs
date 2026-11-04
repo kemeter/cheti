@@ -11,7 +11,7 @@ use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
     encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
-    validate_zone, KeyedMutex, SendRetrying,
+    validate_ttl, validate_zone, KeyedMutex, SendRetrying,
 };
 
 const ENV_API_URL: &str = "POWERDNS_API_URL";
@@ -35,6 +35,8 @@ pub struct PowerDnsConfig {
     api_base: String,
     server_id: String,
     zone_override: Option<String>,
+    ttl: u32,
+    timeout: Duration,
 }
 
 impl PowerDnsConfig {
@@ -53,6 +55,8 @@ impl PowerDnsConfig {
             api_base: format!("{base}{API_PATH}"),
             server_id: DEFAULT_SERVER_ID.to_string(),
             zone_override: None,
+            ttl: DEFAULT_TTL,
+            timeout: HTTP_TIMEOUT,
         })
     }
 
@@ -76,6 +80,19 @@ impl PowerDnsConfig {
         self.zone_override = Some(zone.trim_end_matches('.').to_ascii_lowercase());
         Ok(self)
     }
+
+    /// TTL of the TXT records `present` creates. Defaults to 60 seconds. An
+    /// existing RRSet keeps its own TTL.
+    pub fn with_ttl(mut self, ttl: u32) -> Result<Self, DnsError> {
+        self.ttl = validate_ttl(ttl)?;
+        Ok(self)
+    }
+
+    /// Upper bound for one HTTP request to the API. Defaults to 30 seconds.
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
 }
 
 /// [`DnsProvider`] backed by the PowerDNS API.
@@ -92,7 +109,7 @@ impl PowerDnsProvider {
     /// Builds the provider and its HTTP client.
     pub fn new(config: PowerDnsConfig) -> Result<Self, DnsError> {
         let http = reqwest::Client::builder()
-            .timeout(HTTP_TIMEOUT)
+            .timeout(config.timeout)
             .connect_timeout(CONNECT_TIMEOUT)
             .build()
             .map_err(DnsError::Http)?;
@@ -349,7 +366,7 @@ impl DnsProvider for PowerDnsProvider {
                 }
                 (rrset.ttl, rrset.records)
             }
-            None => (DEFAULT_TTL, Vec::new()),
+            None => (self.config.ttl, Vec::new()),
         };
         records.push(PdnsRecord {
             content: format!("\"{value}\""),

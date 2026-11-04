@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use cheti::{CloudflareConfig, CloudflareProvider, DnsProvider};
 use serde_json::{json, Value};
 use wiremock::matchers::{header, method, path, query_param};
@@ -273,4 +275,66 @@ async fn fqdn_outside_the_configured_zone_is_rejected_before_any_request() {
         .await
         .unwrap_err();
     assert!(err.to_string().contains("not within zone"), "{err}");
+}
+
+#[tokio::test]
+async fn present_uses_the_configured_ttl() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path(records_path()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(cf_ok::<Vec<Value>>(vec![])))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path(records_path()))
+        .respond_with(move |req: &Request| {
+            let body: Value = serde_json::from_slice(&req.body).unwrap();
+            assert_eq!(body["ttl"], 120);
+            ResponseTemplate::new(200).set_body_json(cf_ok(json!({
+                "id": "rec1", "type": "TXT", "name": FQDN, "content": format!("\"{VALUE}\""), "ttl": 120
+            })))
+        })
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let config = CloudflareConfig::new("test-token")
+        .with_api_base(server.uri())
+        .unwrap()
+        .with_zone_id(ZONE, ZONE_ID)
+        .unwrap()
+        .with_ttl(120)
+        .unwrap();
+    let provider = CloudflareProvider::new(config).unwrap();
+    provider.present(FQDN, VALUE).await.unwrap();
+}
+
+#[tokio::test]
+async fn requests_time_out_after_the_configured_timeout() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path(records_path()))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(cf_ok::<Vec<Value>>(vec![]))
+                .set_delay(Duration::from_secs(5)),
+        )
+        .mount(&server)
+        .await;
+
+    let config = CloudflareConfig::new("test-token")
+        .with_api_base(server.uri())
+        .unwrap()
+        .with_zone_id(ZONE, ZONE_ID)
+        .unwrap()
+        .with_timeout(Duration::from_millis(200));
+    let provider = CloudflareProvider::new(config).unwrap();
+
+    let result = tokio::time::timeout(Duration::from_secs(3), provider.present(FQDN, VALUE))
+        .await
+        .expect("the request must time out before the server answers");
+    assert!(result.is_err());
 }
