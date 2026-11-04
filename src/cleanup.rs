@@ -4,6 +4,12 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use crate::error::DnsError;
+
+/// Receives the name a cleanup was for (a TXT record FQDN or a TLS-ALPN-01
+/// domain) and the error it failed with.
+pub(crate) type CleanupErrorHook = Arc<dyn Fn(&str, &DnsError) + Send + Sync>;
+
 type CleanupFn<T> = Arc<dyn Fn(T) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
 /// Tracks what a solver has put in place and must take down.

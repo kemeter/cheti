@@ -6,6 +6,12 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `on_cleanup_error` on `Dns01Solver` and `TlsAlpn01Solver`, called with the
+  name and the error when removing challenge material fails. Such failures
+  were previously ignored without a trace.
+
 ## [0.1.0] - 2026-10-20
 
 First release.
