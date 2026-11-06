@@ -6,6 +6,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-06
+
 ### Added
 
 - `on_cleanup_error` on `Dns01Solver` and `TlsAlpn01Solver`, called with the
@@ -41,5 +43,6 @@ First release.
 - `testing` feature exposing `MockDnsProvider` and `MockChallengeResponder`.
 - Minimum supported Rust version: 1.89.
 
-[Unreleased]: https://github.com/kemeter/cheti/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/kemeter/cheti/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/kemeter/cheti/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/kemeter/cheti/releases/tag/v0.1.0
