@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cheti::{DnsProvider, GandiConfig, GandiProvider};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 

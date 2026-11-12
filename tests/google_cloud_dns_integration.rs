@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use cheti::{DnsError, DnsProvider, GoogleCloudDnsConfig, GoogleCloudDnsProvider};
 use data_encoding::BASE64URL_NOPAD;
-use ring::signature::{KeyPair, RsaKeyPair, UnparsedPublicKey, RSA_PKCS1_2048_8192_SHA256};
-use serde_json::{json, Value};
+use ring::signature::{KeyPair, RSA_PKCS1_2048_8192_SHA256, RsaKeyPair, UnparsedPublicKey};
+use serde_json::{Value, json};
 use wiremock::matchers::{header, method, path, query_param, query_param_is_missing};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 

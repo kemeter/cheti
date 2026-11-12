@@ -3,5 +3,5 @@ pub mod propagation;
 /// Finding the zone that owns a name.
 pub mod zone;
 
-pub use propagation::{wait_for_propagation, DEFAULT_RESOLVERS};
+pub use propagation::{DEFAULT_RESOLVERS, wait_for_propagation};
 pub use zone::find_zone;

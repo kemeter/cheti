@@ -171,10 +171,10 @@ impl<R: ChallengeResponder + 'static> TlsAlpn01Solver<R> {
             let responder = Arc::clone(&responder);
             let on_error = on_error.clone();
             async move {
-                if let Err(e) = responder.cleanup(&domain).await {
-                    if let Some(hook) = on_error {
-                        hook(&domain, &e);
-                    }
+                if let Err(e) = responder.cleanup(&domain).await
+                    && let Some(hook) = on_error
+                {
+                    hook(&domain, &e);
                 }
             }
         })
@@ -241,13 +241,13 @@ async fn set_ready_by_url(order: &mut Order, url: &str) -> Result<(), DnsError> 
     let mut authorizations = order.authorizations();
     while let Some(result) = authorizations.next().await {
         let mut authz = result.map_err(|e| DnsError::Acme(e.to_string()))?;
-        if let Some(mut challenge) = authz.challenge(ChallengeType::TlsAlpn01) {
-            if challenge.url == url {
-                return challenge
-                    .set_ready()
-                    .await
-                    .map_err(|e| DnsError::Acme(e.to_string()));
-            }
+        if let Some(mut challenge) = authz.challenge(ChallengeType::TlsAlpn01)
+            && challenge.url == url
+        {
+            return challenge
+                .set_ready()
+                .await
+                .map_err(|e| DnsError::Acme(e.to_string()));
         }
     }
     Err(DnsError::Other(format!(
@@ -310,7 +310,7 @@ mod tests {
 
         // The acmeIdentifier extension: OID 1.3.6.1.5.5.7.1.31, critical, value
         // = OCTET STRING of the digest.
-        let acme_oid = der_parser::oid!(1.3.6 .1 .5 .5 .7 .1 .31);
+        let acme_oid = der_parser::oid!(1.3.6.1.5.5.7.1.31);
         let ext = parsed
             .extensions()
             .iter()

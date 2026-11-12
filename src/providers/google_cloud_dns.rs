@@ -5,21 +5,21 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use data_encoding::BASE64URL_NOPAD;
 use ring::rand::SystemRandom;
-use ring::signature::{RsaKeyPair, RSA_PKCS1_SHA256};
-use rustls_pki_types::pem::PemObject;
+use ring::signature::{RSA_PKCS1_SHA256, RsaKeyPair};
 use rustls_pki_types::PrivatePkcs8KeyDer;
+use rustls_pki_types::pem::PemObject;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::time::Instant;
 
-use super::common::{env_required, env_value, process_env, Lookup};
+use super::common::{Lookup, env_required, env_value, process_env};
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
-    api_error, encode_path, validate_acme_value, validate_fqdn, validate_https_base, validate_ttl,
-    KeyedMutex, SendRetrying,
+    KeyedMutex, SendRetrying, api_error, encode_path, validate_acme_value, validate_fqdn,
+    validate_https_base, validate_ttl,
 };
 
 const GCDNS_API_BASE: &str = "https://dns.googleapis.com/dns/v1";
@@ -70,12 +70,12 @@ impl GoogleCloudDnsConfig {
         // The serde error never quotes string values, so it cannot leak the key.
         let key: ServiceAccountKey = serde_json::from_str(json)
             .map_err(|e| DnsError::Other(format!("{PROVIDER} invalid service account key: {e}")))?;
-        if let Some(kind) = &key.kind {
-            if kind != "service_account" {
-                return Err(DnsError::Other(format!(
-                    "{PROVIDER} credentials must be a service account key, got type {kind}"
-                )));
-            }
+        if let Some(kind) = &key.kind
+            && kind != "service_account"
+        {
+            return Err(DnsError::Other(format!(
+                "{PROVIDER} credentials must be a service account key, got type {kind}"
+            )));
         }
         let token_uri = key
             .token_uri
@@ -282,10 +282,10 @@ impl GoogleCloudDnsProvider {
     /// the exchange so concurrent callers share a single token request.
     async fn access_token(&self) -> Result<String, DnsError> {
         let mut cached = self.token.lock().await;
-        if let Some(token) = cached.as_ref() {
-            if Instant::now() < token.refresh_at {
-                return Ok(token.value.expose_secret().to_string());
-            }
+        if let Some(token) = cached.as_ref()
+            && Instant::now() < token.refresh_at
+        {
+            return Ok(token.value.expose_secret().to_string());
         }
 
         let assertion = self.signed_assertion()?;

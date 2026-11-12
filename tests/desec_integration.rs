@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cheti::{DesecConfig, DesecProvider, DnsProvider};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 

@@ -4,13 +4,13 @@ use std::time::Duration;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Deserializer, Serialize};
 
-use super::common::{env_required, process_env, Lookup};
+use super::common::{Lookup, env_required, process_env};
 use crate::dns::find_zone;
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
-    encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
-    validate_ttl, validate_zone, KeyedMutex, SendRetrying,
+    KeyedMutex, SendRetrying, encode_path, relative_name, validate_acme_value, validate_fqdn,
+    validate_https_base, validate_ttl, validate_zone,
 };
 
 const PORKBUN_API_BASE: &str = "https://api.porkbun.com/api/json/v3";
@@ -297,10 +297,10 @@ async fn parse_envelope(
         .as_ref()
         .and_then(|b| serde_json::from_value::<Envelope>(b.clone()).ok());
 
-    if let (true, Some(env), Some(body)) = (status.is_success(), &envelope, &body) {
-        if env.status.eq_ignore_ascii_case("SUCCESS") {
-            return Ok(body.clone());
-        }
+    if let (true, Some(env), Some(body)) = (status.is_success(), &envelope, &body)
+        && env.status.eq_ignore_ascii_case("SUCCESS")
+    {
+        return Ok(body.clone());
     }
 
     if status == reqwest::StatusCode::TOO_MANY_REQUESTS {

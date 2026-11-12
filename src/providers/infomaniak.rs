@@ -6,12 +6,12 @@ use std::time::Duration;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
-use super::common::{env_required, process_env, Lookup};
+use super::common::{Lookup, env_required, process_env};
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
-    api_error, encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
-    validate_ttl_range, validate_zone, KeyedMutex, SendRetrying,
+    KeyedMutex, SendRetrying, api_error, encode_path, relative_name, validate_acme_value,
+    validate_fqdn, validate_https_base, validate_ttl_range, validate_zone,
 };
 
 const INFOMANIAK_API_BASE: &str = "https://api.infomaniak.com";
@@ -260,10 +260,10 @@ impl InfomaniakProvider {
         if !status.is_success() {
             let raw = response.text().await.unwrap_or_default();
             // Another writer created the same record in the meantime.
-            if let Ok(err) = serde_json::from_str::<IkEnvelope<serde_json::Value>>(&raw) {
-                if err.error_code() == Some(ALREADY_EXISTS) {
-                    return Ok(());
-                }
+            if let Ok(err) = serde_json::from_str::<IkEnvelope<serde_json::Value>>(&raw)
+                && err.error_code() == Some(ALREADY_EXISTS)
+            {
+                return Ok(());
             }
             return Err(DnsError::Api(format!(
                 "{PROVIDER} POST {path} returned {status}: {}",

@@ -23,7 +23,7 @@ pub mod testing;
 pub mod tls_alpn;
 
 pub use account_store::{AccountStore, FileAccountStore};
-pub use dns::{find_zone, wait_for_propagation, DEFAULT_RESOLVERS};
+pub use dns::{DEFAULT_RESOLVERS, find_zone, wait_for_propagation};
 pub use error::DnsError;
 pub use provider::{DnsProvider, PropagationTiming};
 pub use providers::bunny::{BunnyConfig, BunnyProvider};
@@ -41,12 +41,12 @@ pub use providers::rfc2136::{Rfc2136Config, Rfc2136Provider, TsigAlgorithm};
 pub use providers::route53::{Route53Config, Route53Provider};
 pub use providers::scaleway::{ScalewayConfig, ScalewayProvider};
 pub use renewal::{
-    cert_lifetime, cert_lifetime_at, needs_renewal, needs_renewal_at, needs_renewal_at_checked,
-    needs_renewal_checked, needs_renewal_ratio, needs_renewal_ratio_at,
-    needs_renewal_ratio_at_checked, needs_renewal_ratio_checked, CertLifetime,
+    CertLifetime, cert_lifetime, cert_lifetime_at, needs_renewal, needs_renewal_at,
+    needs_renewal_at_checked, needs_renewal_checked, needs_renewal_ratio, needs_renewal_ratio_at,
+    needs_renewal_ratio_at_checked, needs_renewal_ratio_checked,
 };
 pub use solver::Dns01Solver;
 pub use tls_alpn::{
-    build_challenge_certificate, ChallengeCertificate, ChallengeResponder, TlsAlpn01Solver,
-    ACME_TLS_ALPN_NAME,
+    ACME_TLS_ALPN_NAME, ChallengeCertificate, ChallengeResponder, TlsAlpn01Solver,
+    build_challenge_certificate,
 };

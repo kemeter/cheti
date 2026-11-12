@@ -105,7 +105,7 @@ fn build(name: &str, lookup: common::Lookup<'_>) -> Result<Box<dyn DnsProvider>,
             return Err(DnsError::Other(format!(
                 "unknown DNS provider `{name}`: expected one of {}",
                 NAMES.join(", ")
-            )))
+            )));
         }
     };
     Ok(provider)
@@ -114,21 +114,23 @@ fn build(name: &str, lookup: common::Lookup<'_>) -> Result<Box<dyn DnsProvider>,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    use std::collections::HashMap;
 
-    /// The tests here set environment variables: one at a time.
-    static ENV: Mutex<()> = Mutex::new(());
-
-    fn lock() -> std::sync::MutexGuard<'static, ()> {
-        ENV.lock().unwrap_or_else(|e| e.into_inner())
+    /// A lookup reading `vars` alone: the tests never touch the process's
+    /// environment, which other tests may read at the same time.
+    fn vars(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
+        let vars: HashMap<String, String> = pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        move |name| vars.get(name).cloned()
     }
 
     #[test]
     fn a_variable_is_read_from_itself_or_its_file() {
-        let _env = lock();
-        std::env::set_var("CHETI_TEST_DIRECT", "direct");
+        let direct = vars(&[("CHETI_TEST_DIRECT", "direct")]);
         assert_eq!(
-            common::env_value(&common::process_env, &["CHETI_TEST_DIRECT"])
+            common::env_value(&direct, &["CHETI_TEST_DIRECT"])
                 .unwrap()
                 .as_deref(),
             Some("direct")
@@ -138,45 +140,33 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("secret");
         std::fs::write(&file, "from-file\n").unwrap();
-        std::env::set_var("CHETI_TEST_SECRET_FILE", &file);
+        let path = file.to_string_lossy().to_string();
+        let from_file = vars(&[("CHETI_TEST_SECRET_FILE", &path)]);
         assert_eq!(
-            common::env_value(&common::process_env, &["CHETI_TEST_SECRET"])
+            common::env_value(&from_file, &["CHETI_TEST_SECRET"])
                 .unwrap()
                 .as_deref(),
             Some("from-file")
         );
-        std::env::remove_var("CHETI_TEST_SECRET_FILE");
         std::fs::remove_dir_all(&dir).unwrap();
-        std::env::remove_var("CHETI_TEST_DIRECT");
     }
 
     /// The first name set wins; an empty one counts as unset.
     #[test]
     fn the_first_name_set_wins() {
-        let _env = lock();
-        std::env::set_var("CHETI_TEST_FIRST", "");
-        std::env::set_var("CHETI_TEST_SECOND", "second");
+        let lookup = vars(&[("CHETI_TEST_FIRST", ""), ("CHETI_TEST_SECOND", "second")]);
         assert_eq!(
-            common::env_value(
-                &common::process_env,
-                &["CHETI_TEST_FIRST", "CHETI_TEST_SECOND"]
-            )
-            .unwrap()
-            .as_deref(),
+            common::env_value(&lookup, &["CHETI_TEST_FIRST", "CHETI_TEST_SECOND"])
+                .unwrap()
+                .as_deref(),
             Some("second")
         );
-        std::env::remove_var("CHETI_TEST_FIRST");
-        std::env::remove_var("CHETI_TEST_SECOND");
     }
 
     #[test]
     fn a_missing_variable_names_every_accepted_one() {
-        let _env = lock();
-        let err = common::env_required(
-            &common::process_env,
-            &["CHETI_TEST_NONE", "CHETI_TEST_ALIAS"],
-        )
-        .unwrap_err();
+        let err =
+            common::env_required(&vars(&[]), &["CHETI_TEST_NONE", "CHETI_TEST_ALIAS"]).unwrap_err();
         let message = err.to_string();
         for name in [
             "CHETI_TEST_NONE",
@@ -190,55 +180,57 @@ mod tests {
 
     #[test]
     fn an_unreadable_file_is_an_error() {
-        let _env = lock();
-        std::env::set_var("CHETI_TEST_GONE_FILE", "/nonexistent/cheti/secret");
-        assert!(common::env_value(&common::process_env, &["CHETI_TEST_GONE"]).is_err());
-        std::env::remove_var("CHETI_TEST_GONE_FILE");
+        let lookup = vars(&[("CHETI_TEST_GONE_FILE", "/nonexistent/cheti/secret")]);
+        assert!(common::env_value(&lookup, &["CHETI_TEST_GONE"]).is_err());
+    }
+
+    /// The process's environment is read as it is.
+    #[test]
+    fn the_process_environment_is_read() {
+        let (name, value) = std::env::vars()
+            .find(|(_, v)| !v.is_empty())
+            .expect("a non-empty variable");
+        assert_eq!(common::process_env(&name), Some(value));
     }
 
     /// A provider is built by its name or lego's, from cheti's variables or
     /// lego's.
     #[test]
     fn a_provider_is_built_by_name_from_lego_variables() {
-        let _env = lock();
-        std::env::set_var("CF_DNS_API_TOKEN", "lego-token");
-        assert!(from_env("cloudflare").is_ok());
-        assert!(from_env("Cloudflare").is_ok());
-        std::env::remove_var("CF_DNS_API_TOKEN");
+        let cloudflare = vars(&[("CF_DNS_API_TOKEN", "lego-token")]);
+        assert!(from_env_with("cloudflare", &cloudflare).is_ok());
+        assert!(from_env_with("Cloudflare", &cloudflare).is_ok());
 
-        std::env::set_var("PDNS_API_URL", "https://pdns.example.com");
-        std::env::set_var("PDNS_API_KEY", "key");
-        assert!(from_env("pdns").is_ok());
-        assert!(from_env("powerdns").is_ok());
-        std::env::remove_var("PDNS_API_URL");
-        std::env::remove_var("PDNS_API_KEY");
+        let pdns = vars(&[
+            ("PDNS_API_URL", "https://pdns.example.com"),
+            ("PDNS_API_KEY", "key"),
+        ]);
+        assert!(from_env_with("pdns", &pdns).is_ok());
+        assert!(from_env_with("powerdns", &pdns).is_ok());
     }
 
-    /// Through a lookup, a variable can come under another name, without
-    /// touching the process's environment.
+    /// Through a lookup, a variable can come under another name.
     #[test]
     fn a_provider_is_built_through_a_lookup() {
-        let lookup = |var: &str| match var {
-            "OVH_APPLICATION_KEY" => Some("ak".to_string()),
-            "OVH_APPLICATION_SECRET" => Some("as".to_string()),
-            "OVH_CONSUMER_KEY" => Some("ck".to_string()),
-            "OVH_ENDPOINT" => Some("ovh-ca".to_string()),
-            _ => None,
-        };
-        assert!(from_env_with("ovh", lookup).is_ok());
-        let missing = from_env_with("ovh", |_| None).err().unwrap().to_string();
+        let ovh = vars(&[
+            ("OVH_APPLICATION_KEY", "ak"),
+            ("OVH_APPLICATION_SECRET", "as"),
+            ("OVH_CONSUMER_KEY", "ck"),
+            ("OVH_ENDPOINT", "ovh-ca"),
+        ]);
+        assert!(from_env_with("ovh", &ovh).is_ok());
+        let missing = from_env_with("ovh", vars(&[])).err().unwrap().to_string();
         assert!(missing.contains("OVH_APPLICATION_KEY"), "{missing}");
         let bad_endpoint = from_env_with("ovh", |var| match var {
             "OVH_ENDPOINT" => Some("ovh-asia".to_string()),
-            other => lookup(other),
+            other => ovh(other),
         });
         assert!(bad_endpoint.is_err());
     }
 
     #[test]
     fn an_unknown_name_lists_the_known_ones() {
-        let _env = lock();
-        let message = from_env("azure").err().unwrap().to_string();
+        let message = from_env_with("azure", vars(&[])).err().unwrap().to_string();
         assert!(
             message.contains("unknown DNS provider `azure`"),
             "{message}"
@@ -248,10 +240,9 @@ mod tests {
 
     #[test]
     fn every_name_is_known() {
-        let _env = lock();
         for name in NAMES {
             // Without credentials: told missing, not unknown.
-            let message = match from_env(name) {
+            let message = match from_env_with(name, vars(&[])) {
                 Ok(_) => continue,
                 Err(e) => e.to_string(),
             };
@@ -273,12 +264,16 @@ mod tests {
             "soyoustart-eu",
             "soyoustart-ca",
         ] {
-            assert!(ovh::OvhConfig::new("a", "b", "c")
-                .with_endpoint(endpoint)
-                .is_ok());
+            assert!(
+                ovh::OvhConfig::new("a", "b", "c")
+                    .with_endpoint(endpoint)
+                    .is_ok()
+            );
         }
-        assert!(ovh::OvhConfig::new("a", "b", "c")
-            .with_endpoint("ovh-asia")
-            .is_err());
+        assert!(
+            ovh::OvhConfig::new("a", "b", "c")
+                .with_endpoint("ovh-asia")
+                .is_err()
+        );
     }
 }
