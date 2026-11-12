@@ -6,6 +6,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-12
+
 ### Added
 
 - `providers::from_env(name)`, building a provider from its name and its
@@ -66,6 +68,7 @@ First release.
 - `testing` feature exposing `MockDnsProvider` and `MockChallengeResponder`.
 - Minimum supported Rust version: 1.89.
 
-[Unreleased]: https://github.com/kemeter/cheti/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/kemeter/cheti/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/kemeter/cheti/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/kemeter/cheti/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/kemeter/cheti/releases/tag/v0.1.0
