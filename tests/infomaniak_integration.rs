@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cheti::{DnsProvider, InfomaniakConfig, InfomaniakProvider};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
@@ -527,8 +527,10 @@ async fn present_uses_the_configured_ttl() {
 #[test]
 fn a_ttl_outside_infomaniak_range_is_refused() {
     assert!(InfomaniakConfig::new("test-token").with_ttl(0).is_err());
-    assert!(InfomaniakConfig::new("test-token")
-        .with_ttl(86_401)
-        .is_err());
+    assert!(
+        InfomaniakConfig::new("test-token")
+            .with_ttl(86_401)
+            .is_err()
+    );
     assert!(InfomaniakConfig::new("test-token").with_ttl(60).is_ok());
 }

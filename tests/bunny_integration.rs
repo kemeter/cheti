@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use cheti::{BunnyConfig, BunnyProvider, DnsError, DnsProvider};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use wiremock::matchers::{body_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 

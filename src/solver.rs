@@ -156,10 +156,10 @@ impl<P: DnsProvider + 'static> Dns01Solver<P> {
             let provider = Arc::clone(&provider);
             let on_error = on_error.clone();
             async move {
-                if let Err(e) = provider.cleanup(&record.fqdn, &record.value).await {
-                    if let Some(hook) = on_error {
-                        hook(&record.fqdn, &e);
-                    }
+                if let Err(e) = provider.cleanup(&record.fqdn, &record.value).await
+                    && let Some(hook) = on_error
+                {
+                    hook(&record.fqdn, &e);
                 }
             }
         })
@@ -306,14 +306,14 @@ impl ChallengeDriver for InstantAcmeDriver {
         let mut authorizations = self.order.authorizations();
         while let Some(result) = authorizations.next().await {
             let mut authz = result.map_err(|e| DnsError::Acme(e.to_string()))?;
-            if let Some(mut challenge) = authz.challenge(ChallengeType::Dns01) {
-                if let Some(pos) = targets.iter().position(|url| *url == challenge.url) {
-                    challenge
-                        .set_ready()
-                        .await
-                        .map_err(|e| DnsError::Acme(e.to_string()))?;
-                    targets.swap_remove(pos);
-                }
+            if let Some(mut challenge) = authz.challenge(ChallengeType::Dns01)
+                && let Some(pos) = targets.iter().position(|url| *url == challenge.url)
+            {
+                challenge
+                    .set_ready()
+                    .await
+                    .map_err(|e| DnsError::Acme(e.to_string()))?;
+                targets.swap_remove(pos);
             }
         }
         match targets.first() {

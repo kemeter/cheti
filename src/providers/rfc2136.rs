@@ -11,15 +11,15 @@ use async_trait::async_trait;
 use data_encoding::BASE64;
 use hickory_proto::op::update_message::{append, delete_by_rdata};
 use hickory_proto::op::{Message, MessageType, OpCode, ResponseCode};
-use hickory_proto::rr::rdata::tsig::{TsigAlgorithm as HickoryTsigAlgorithm, TsigError};
 use hickory_proto::rr::rdata::TXT;
+use hickory_proto::rr::rdata::tsig::{TsigAlgorithm as HickoryTsigAlgorithm, TsigError};
 use hickory_proto::rr::{Name, RData, Record, RecordSet, TSigVerifier, TSigner};
 use secrecy::{ExposeSecret, SecretString};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use zeroize::Zeroizing;
 
-use super::common::{env_required, env_value, process_env, Lookup};
+use super::common::{Lookup, env_required, env_value, process_env};
 use crate::dns::find_zone;
 use crate::error::DnsError;
 use crate::provider::DnsProvider;

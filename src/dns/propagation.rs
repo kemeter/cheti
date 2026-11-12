@@ -2,10 +2,10 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::time::Duration;
 
+use hickory_resolver::TokioResolver;
 use hickory_resolver::config::{ConnectionConfig, NameServerConfig, ResolverConfig};
 use hickory_resolver::net::runtime::TokioRuntimeProvider;
 use hickory_resolver::proto::rr::{RData, RecordType};
-use hickory_resolver::TokioResolver;
 use tokio::time::Instant;
 
 use crate::dns::zone::find_zone;

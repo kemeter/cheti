@@ -4,18 +4,18 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use hmac::{Hmac, KeyInit, Mac};
-use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
+use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use url::Url;
 
-use super::common::{env_required, env_value, process_env, Lookup};
+use super::common::{Lookup, env_required, env_value, process_env};
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
-    retry_backoff, truncate_error_body, validate_acme_value, validate_fqdn, validate_https_base,
-    validate_ttl, KeyedMutex, SendRetrying, MAX_ATTEMPTS,
+    KeyedMutex, MAX_ATTEMPTS, SendRetrying, retry_backoff, truncate_error_body,
+    validate_acme_value, validate_fqdn, validate_https_base, validate_ttl,
 };
 
 const ROUTE53_API_BASE: &str = "https://route53.amazonaws.com/2013-04-01";
@@ -167,10 +167,10 @@ impl Route53Provider {
         let access_key_id = env_required(lookup, &[ENV_ACCESS_KEY_ID])?;
         let secret_access_key = env_required(lookup, &[ENV_SECRET_ACCESS_KEY])?;
         let mut config = Route53Config::new(access_key_id, secret_access_key);
-        if let Some(token) = env_value(lookup, &[ENV_SESSION_TOKEN])? {
-            if !token.is_empty() {
-                config = config.with_session_token(token);
-            }
+        if let Some(token) = env_value(lookup, &[ENV_SESSION_TOKEN])?
+            && !token.is_empty()
+        {
+            config = config.with_session_token(token);
         }
         Self::new(config)
     }
@@ -970,12 +970,16 @@ mod tests {
             .with_hosted_zone_id("/hostedzone/Z123ABC")
             .unwrap();
         assert_eq!(cfg.hosted_zone_id.as_deref(), Some("Z123ABC"));
-        assert!(Route53Config::new("id", "secret")
-            .with_hosted_zone_id("Z1/../x")
-            .is_err());
-        assert!(Route53Config::new("id", "secret")
-            .with_hosted_zone_id("")
-            .is_err());
+        assert!(
+            Route53Config::new("id", "secret")
+                .with_hosted_zone_id("Z1/../x")
+                .is_err()
+        );
+        assert!(
+            Route53Config::new("id", "secret")
+                .with_hosted_zone_id("")
+                .is_err()
+        );
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use cheti::{DnsError, DnsProvider, PorkbunConfig, PorkbunProvider};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
@@ -418,10 +418,12 @@ async fn present_rejects_fqdn_outside_zone() {
     forbid_writes(&server).await;
 
     let provider = build_provider(&server);
-    assert!(provider
-        .present("_acme-challenge.other.org", VALUE)
-        .await
-        .is_err());
+    assert!(
+        provider
+            .present("_acme-challenge.other.org", VALUE)
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]

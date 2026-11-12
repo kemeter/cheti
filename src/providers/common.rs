@@ -3,7 +3,7 @@ use std::future::Future;
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use std::time::Duration;
 
-use percent_encoding::{utf8_percent_encode, AsciiSet, PercentEncode, CONTROLS};
+use percent_encoding::{AsciiSet, CONTROLS, PercentEncode, utf8_percent_encode};
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 use url::Url;
 
@@ -306,10 +306,10 @@ pub(crate) fn process_env(name: &str) -> Option<String> {
 /// variables of a Traefik or lego setup work as they are.
 pub(crate) fn env_value(lookup: Lookup<'_>, names: &[&str]) -> Result<Option<String>, DnsError> {
     for name in names {
-        if let Some(value) = lookup(name) {
-            if !value.is_empty() {
-                return Ok(Some(value));
-            }
+        if let Some(value) = lookup(name)
+            && !value.is_empty()
+        {
+            return Ok(Some(value));
         }
         let file_var = format!("{name}_FILE");
         if let Some(path) = lookup(&file_var) {

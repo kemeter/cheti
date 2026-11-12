@@ -1,7 +1,7 @@
 use std::sync::OnceLock;
 
-use hickory_resolver::proto::rr::RecordType;
 use hickory_resolver::TokioResolver;
+use hickory_resolver::proto::rr::RecordType;
 
 use crate::error::DnsError;
 
@@ -38,10 +38,10 @@ pub async fn find_zone(fqdn: &str) -> Result<String, DnsError> {
             return Err(DnsError::ZoneNotFound(fqdn.to_string()));
         }
 
-        if let Ok(response) = resolver.lookup(&candidate, RecordType::SOA).await {
-            if response.answers().iter().next().is_some() {
-                return Ok(candidate);
-            }
+        if let Ok(response) = resolver.lookup(&candidate, RecordType::SOA).await
+            && response.answers().iter().next().is_some()
+        {
+            return Ok(candidate);
         }
 
         let Some((_, rest)) = candidate.split_once('.') else {

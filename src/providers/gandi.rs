@@ -4,13 +4,13 @@ use std::time::Duration;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
-use super::common::{env_required, process_env, Lookup};
+use super::common::{Lookup, env_required, process_env};
 use crate::dns::find_zone;
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
-    api_error, encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
-    validate_ttl_range, validate_zone, KeyedMutex, SendRetrying,
+    KeyedMutex, SendRetrying, api_error, encode_path, relative_name, validate_acme_value,
+    validate_fqdn, validate_https_base, validate_ttl_range, validate_zone,
 };
 
 const GANDI_API_BASE: &str = "https://api.gandi.net/v5";

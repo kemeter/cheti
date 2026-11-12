@@ -15,6 +15,11 @@ project follows [Semantic Versioning](https://semver.org/).
   variables through a function instead, to take one under another name or
   from configuration.
 - `RFC2136_ZONE` in `Rfc2136Provider::from_env`.
+
+### Changed
+
+- The crate is on the 2024 edition. The minimum supported Rust version is
+  unchanged (1.89), and so is the API.
 - Every provider's `from_env` reads lego's variable names where they differ
   from cheti's (`CF_DNS_API_TOKEN`, `DO_AUTH_TOKEN`, `PDNS_*`,
   `SCALEWAY_API_TOKEN`, `GCE_SERVICE_ACCOUNT`, `GCE_SERVICE_ACCOUNT_FILE`,

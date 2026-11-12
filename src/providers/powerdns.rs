@@ -6,12 +6,12 @@ use std::time::Duration;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
-use super::common::{env_required, env_value, process_env, Lookup};
+use super::common::{Lookup, env_required, env_value, process_env};
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
-    encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
-    validate_ttl, validate_zone, KeyedMutex, SendRetrying,
+    KeyedMutex, SendRetrying, encode_path, relative_name, validate_acme_value, validate_fqdn,
+    validate_https_base, validate_ttl, validate_zone,
 };
 
 const ENV_API_URL: &str = "POWERDNS_API_URL";

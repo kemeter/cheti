@@ -6,13 +6,13 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 
-use super::common::{env_required, env_value, process_env, Lookup};
+use super::common::{Lookup, env_required, env_value, process_env};
 use crate::dns::find_zone;
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
-    api_error, encode_path, relative_name, validate_acme_value, validate_fqdn, validate_https_base,
-    validate_ttl, validate_zone, KeyedMutex, SendRetrying,
+    KeyedMutex, SendRetrying, api_error, encode_path, relative_name, validate_acme_value,
+    validate_fqdn, validate_https_base, validate_ttl, validate_zone,
 };
 
 const OVH_EU_API_BASE: &str = "https://eu.api.ovh.com/1.0";
@@ -71,7 +71,7 @@ impl OvhConfig {
             other => {
                 return Err(DnsError::Other(format!(
                     "unknown OVH endpoint `{other}`: expected ovh-eu, ovh-ca, ovh-us, kimsufi-eu, kimsufi-ca, soyoustart-eu or soyoustart-ca"
-                )))
+                )));
             }
         };
         self.with_api_base(base)
