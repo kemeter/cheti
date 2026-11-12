@@ -1,6 +1,5 @@
 use async_trait::async_trait;
 use std::collections::HashMap;
-use std::env;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -11,6 +10,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use url::Url;
 
+use super::common::{env_required, env_value};
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
@@ -159,12 +159,10 @@ impl Route53Provider {
     /// Reads `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and the optional
     /// `AWS_SESSION_TOKEN`.
     pub fn from_env() -> Result<Self, DnsError> {
-        let access_key_id = env::var(ENV_ACCESS_KEY_ID)
-            .map_err(|_| DnsError::MissingCredentials(ENV_ACCESS_KEY_ID.into()))?;
-        let secret_access_key = env::var(ENV_SECRET_ACCESS_KEY)
-            .map_err(|_| DnsError::MissingCredentials(ENV_SECRET_ACCESS_KEY.into()))?;
+        let access_key_id = env_required(&[ENV_ACCESS_KEY_ID])?;
+        let secret_access_key = env_required(&[ENV_SECRET_ACCESS_KEY])?;
         let mut config = Route53Config::new(access_key_id, secret_access_key);
-        if let Ok(token) = env::var(ENV_SESSION_TOKEN) {
+        if let Some(token) = env_value(&[ENV_SESSION_TOKEN])? {
             if !token.is_empty() {
                 config = config.with_session_token(token);
             }

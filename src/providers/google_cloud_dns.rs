@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use std::env;
 use std::fmt;
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -15,6 +14,7 @@ use serde_json::Value;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::time::Instant;
 
+use super::common::{env_required, env_value};
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
@@ -26,6 +26,10 @@ const GCDNS_API_BASE: &str = "https://dns.googleapis.com/dns/v1";
 const DEFAULT_TOKEN_URI: &str = "https://oauth2.googleapis.com/token";
 /// Path of the service account key file, as used by Google's own libraries.
 const ENV_CREDENTIALS: &str = "GOOGLE_APPLICATION_CREDENTIALS";
+/// lego's names: the key file's path, the key itself, the project.
+const ENV_LEGO_CREDENTIALS_FILE: &str = "GCE_SERVICE_ACCOUNT_FILE";
+const ENV_LEGO_CREDENTIALS: &str = "GCE_SERVICE_ACCOUNT";
+const ENV_LEGO_PROJECT: &str = "GCE_PROJECT";
 const SCOPE: &str = "https://www.googleapis.com/auth/ndev.clouddns.readwrite";
 const JWT_GRANT_TYPE: &str = "urn:ietf:params:oauth:grant-type:jwt-bearer";
 /// Lifetime requested for the signed assertion; Google caps it at one hour.
@@ -237,12 +241,24 @@ impl GoogleCloudDnsProvider {
         })
     }
 
-    /// Reads the service account key from the file named by
-    /// `GOOGLE_APPLICATION_CREDENTIALS`.
+    /// Reads the service account key from lego's `GCE_SERVICE_ACCOUNT` (the
+    /// key itself), or else from the file named by
+    /// `GOOGLE_APPLICATION_CREDENTIALS` or lego's `GCE_SERVICE_ACCOUNT_FILE`.
+    /// lego's `GCE_PROJECT` overrides the key's project. Each may be read
+    /// from the file its `_FILE` variable names instead.
     pub fn from_env() -> Result<Self, DnsError> {
-        let path = env::var(ENV_CREDENTIALS)
-            .map_err(|_| DnsError::MissingCredentials(ENV_CREDENTIALS.into()))?;
-        Self::new(GoogleCloudDnsConfig::from_service_account_file(path)?)
+        // The key itself, as lego takes it, or else a path to it.
+        let mut config = match env_value(&[ENV_LEGO_CREDENTIALS])? {
+            Some(json) => GoogleCloudDnsConfig::from_service_account_json(&json)?,
+            None => {
+                let path = env_required(&[ENV_CREDENTIALS, ENV_LEGO_CREDENTIALS_FILE])?;
+                GoogleCloudDnsConfig::from_service_account_file(path)?
+            }
+        };
+        if let Some(project) = env_value(&[ENV_LEGO_PROJECT])? {
+            config = config.with_project(project)?;
+        }
+        Self::new(config)
     }
 
     fn zones_path(&self) -> String {

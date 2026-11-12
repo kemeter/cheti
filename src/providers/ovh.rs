@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use std::env;
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -7,6 +6,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 
+use super::common::{env_required, env_value};
 use crate::dns::find_zone;
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
@@ -19,6 +19,7 @@ const OVH_EU_API_BASE: &str = "https://eu.api.ovh.com/1.0";
 const ENV_APP_KEY: &str = "OVH_APPLICATION_KEY";
 const ENV_APP_SECRET: &str = "OVH_APPLICATION_SECRET";
 const ENV_CONSUMER_KEY: &str = "OVH_CONSUMER_KEY";
+const ENV_ENDPOINT: &str = "OVH_ENDPOINT";
 const DEFAULT_TTL: u32 = 60;
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -52,6 +53,28 @@ impl OvhConfig {
             ttl: DEFAULT_TTL,
             timeout: HTTP_TIMEOUT,
         }
+    }
+
+    /// Targets the API of `endpoint`, named as OVH's SDKs and lego name
+    /// them: `ovh-eu` (the default), `ovh-ca`, `ovh-us`, `kimsufi-eu`,
+    /// `kimsufi-ca`, `soyoustart-eu` or `soyoustart-ca`. Credentials belong
+    /// to one endpoint: the wrong one fails every call.
+    pub fn with_endpoint(self, endpoint: &str) -> Result<Self, DnsError> {
+        let base = match endpoint {
+            "ovh-eu" => OVH_EU_API_BASE,
+            "ovh-ca" => "https://ca.api.ovh.com/1.0",
+            "ovh-us" => "https://api.us.ovhcloud.com/1.0",
+            "kimsufi-eu" => "https://eu.api.kimsufi.com/1.0",
+            "kimsufi-ca" => "https://ca.api.kimsufi.com/1.0",
+            "soyoustart-eu" => "https://eu.api.soyoustart.com/1.0",
+            "soyoustart-ca" => "https://ca.api.soyoustart.com/1.0",
+            other => {
+                return Err(DnsError::Other(format!(
+                    "unknown OVH endpoint `{other}`: expected ovh-eu, ovh-ca, ovh-us, kimsufi-eu, kimsufi-ca, soyoustart-eu or soyoustart-ca"
+                )))
+            }
+        };
+        self.with_api_base(base)
     }
 
     /// Overrides the API base URL, e.g. to target a mock server. It must use
@@ -114,15 +137,18 @@ impl OvhProvider {
     }
 
     /// Builds the provider from `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET` and
-    /// `OVH_CONSUMER_KEY`.
+    /// `OVH_CONSUMER_KEY`, on the endpoint `OVH_ENDPOINT` names (`ovh-eu`
+    /// unless set, see [`OvhConfig::with_endpoint`]). Each may be read from
+    /// the file its `_FILE` variable names instead.
     pub fn from_env() -> Result<Self, DnsError> {
-        let ak =
-            env::var(ENV_APP_KEY).map_err(|_| DnsError::MissingCredentials(ENV_APP_KEY.into()))?;
-        let asec = env::var(ENV_APP_SECRET)
-            .map_err(|_| DnsError::MissingCredentials(ENV_APP_SECRET.into()))?;
-        let ck = env::var(ENV_CONSUMER_KEY)
-            .map_err(|_| DnsError::MissingCredentials(ENV_CONSUMER_KEY.into()))?;
-        Self::new(OvhConfig::new(ak, asec, ck))
+        let ak = env_required(&[ENV_APP_KEY])?;
+        let asec = env_required(&[ENV_APP_SECRET])?;
+        let ck = env_required(&[ENV_CONSUMER_KEY])?;
+        let mut config = OvhConfig::new(ak, asec, ck);
+        if let Some(endpoint) = env_value(&[ENV_ENDPOINT])? {
+            config = config.with_endpoint(&endpoint)?;
+        }
+        Self::new(config)
     }
 
     async fn resolve_zone(&self, fqdn: &str) -> Result<String, DnsError> {

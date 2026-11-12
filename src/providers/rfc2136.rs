@@ -2,7 +2,6 @@
 //! TSIG (RFC 8945). Works with any primary server that accepts signed
 //! updates: BIND, Knot DNS, PowerDNS, and others.
 
-use std::env;
 use std::fmt;
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
@@ -20,6 +19,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use zeroize::Zeroizing;
 
+use super::common::{env_required, env_value};
 use crate::dns::find_zone;
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
@@ -364,14 +364,11 @@ impl Rfc2136Provider {
     /// Reads `RFC2136_NAMESERVER`, `RFC2136_TSIG_KEY`, `RFC2136_TSIG_SECRET`
     /// and, optionally, `RFC2136_TSIG_ALGORITHM` (defaults to `hmac-sha256`).
     pub fn from_env() -> Result<Self, DnsError> {
-        let nameserver = env::var(ENV_NAMESERVER)
-            .map_err(|_| DnsError::MissingCredentials(ENV_NAMESERVER.into()))?;
-        let key_name = env::var(ENV_TSIG_KEY)
-            .map_err(|_| DnsError::MissingCredentials(ENV_TSIG_KEY.into()))?;
-        let secret = env::var(ENV_TSIG_SECRET)
-            .map_err(|_| DnsError::MissingCredentials(ENV_TSIG_SECRET.into()))?;
+        let nameserver = env_required(&[ENV_NAMESERVER])?;
+        let key_name = env_required(&[ENV_TSIG_KEY])?;
+        let secret = env_required(&[ENV_TSIG_SECRET])?;
         let mut config = Rfc2136Config::new(nameserver, key_name, secret);
-        if let Ok(algorithm) = env::var(ENV_TSIG_ALGORITHM) {
+        if let Some(algorithm) = env_value(&[ENV_TSIG_ALGORITHM])? {
             config = config.with_algorithm(algorithm.parse()?);
         }
         Self::new(config)

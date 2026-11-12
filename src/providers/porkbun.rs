@@ -1,10 +1,10 @@
 use async_trait::async_trait;
-use std::env;
 use std::time::Duration;
 
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Deserializer, Serialize};
 
+use super::common::env_required;
 use crate::dns::find_zone;
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
@@ -120,10 +120,8 @@ impl PorkbunProvider {
 
     /// Builds the provider from `PORKBUN_API_KEY` and `PORKBUN_SECRET_API_KEY`.
     pub fn from_env() -> Result<Self, DnsError> {
-        let api_key =
-            env::var(ENV_API_KEY).map_err(|_| DnsError::MissingCredentials(ENV_API_KEY.into()))?;
-        let secret_api_key = env::var(ENV_SECRET_API_KEY)
-            .map_err(|_| DnsError::MissingCredentials(ENV_SECRET_API_KEY.into()))?;
+        let api_key = env_required(&[ENV_API_KEY])?;
+        let secret_api_key = env_required(&[ENV_SECRET_API_KEY])?;
         Self::new(PorkbunConfig::new(api_key, secret_api_key))
     }
 

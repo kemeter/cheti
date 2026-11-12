@@ -1,12 +1,12 @@
 use async_trait::async_trait;
 use std::collections::HashMap;
-use std::env;
 use std::sync::Mutex;
 use std::time::Duration;
 
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
+use super::common::env_required;
 use crate::dns::find_zone;
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
@@ -131,10 +131,11 @@ impl CloudflareProvider {
         })
     }
 
-    /// Builds the provider from `CLOUDFLARE_API_TOKEN`.
+    /// Builds the provider from `CLOUDFLARE_API_TOKEN`, or lego's
+    /// `CF_DNS_API_TOKEN` or `CLOUDFLARE_DNS_API_TOKEN`. Each may be read from
+    /// the file its `_FILE` variable names instead.
     pub fn from_env() -> Result<Self, DnsError> {
-        let token =
-            env::var(ENV_TOKEN).map_err(|_| DnsError::MissingCredentials(ENV_TOKEN.into()))?;
+        let token = env_required(&[ENV_TOKEN, "CF_DNS_API_TOKEN", "CLOUDFLARE_DNS_API_TOKEN"])?;
         Self::new(CloudflareConfig::new(token))
     }
 

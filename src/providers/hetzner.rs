@@ -1,10 +1,10 @@
 use async_trait::async_trait;
-use std::env;
 use std::time::Duration;
 
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
+use super::common::env_required;
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
@@ -104,8 +104,7 @@ impl HetznerProvider {
 
     /// Builds the provider from `HETZNER_API_TOKEN`.
     pub fn from_env() -> Result<Self, DnsError> {
-        let token =
-            env::var(ENV_TOKEN).map_err(|_| DnsError::MissingCredentials(ENV_TOKEN.into()))?;
+        let token = env_required(&[ENV_TOKEN])?;
         Self::new(HetznerConfig::new(token))
     }
 

@@ -1,10 +1,10 @@
 use async_trait::async_trait;
-use std::env;
 use std::time::Duration;
 
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
+use super::common::env_required;
 use crate::dns::find_zone;
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
@@ -98,8 +98,7 @@ impl GandiProvider {
 
     /// Builds the provider from `GANDIV5_PERSONAL_ACCESS_TOKEN`.
     pub fn from_env() -> Result<Self, DnsError> {
-        let token =
-            env::var(ENV_TOKEN).map_err(|_| DnsError::MissingCredentials(ENV_TOKEN.into()))?;
+        let token = env_required(&[ENV_TOKEN])?;
         Self::new(GandiConfig::new(token))
     }
 
