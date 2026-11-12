@@ -11,7 +11,10 @@ project follows [Semantic Versioning](https://semver.org/).
 - `providers::from_env(name)`, building a provider from its name and its
   environment variables, as Traefik and lego pick one from a name alone.
   It takes lego's names for providers too (`gandiv5`, `pdns`, `gcloud`);
-  `providers::NAMES` lists them.
+  `providers::NAMES` lists them. `providers::from_env_with` reads the
+  variables through a function instead, to take one under another name or
+  from configuration.
+- `RFC2136_ZONE` in `Rfc2136Provider::from_env`.
 - Every provider's `from_env` reads lego's variable names where they differ
   from cheti's (`CF_DNS_API_TOKEN`, `DO_AUTH_TOKEN`, `PDNS_*`,
   `SCALEWAY_API_TOKEN`, `GCE_SERVICE_ACCOUNT`, `GCE_SERVICE_ACCOUNT_FILE`,

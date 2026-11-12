@@ -19,7 +19,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use zeroize::Zeroizing;
 
-use super::common::{env_required, env_value};
+use super::common::{env_required, env_value, process_env, Lookup};
 use crate::dns::find_zone;
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
@@ -29,6 +29,7 @@ const ENV_NAMESERVER: &str = "RFC2136_NAMESERVER";
 const ENV_TSIG_KEY: &str = "RFC2136_TSIG_KEY";
 const ENV_TSIG_SECRET: &str = "RFC2136_TSIG_SECRET";
 const ENV_TSIG_ALGORITHM: &str = "RFC2136_TSIG_ALGORITHM";
+const ENV_ZONE: &str = "RFC2136_ZONE";
 const DEFAULT_PORT: u16 = 53;
 const DEFAULT_TTL: u32 = 60;
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -362,14 +363,24 @@ impl Rfc2136Provider {
     }
 
     /// Reads `RFC2136_NAMESERVER`, `RFC2136_TSIG_KEY`, `RFC2136_TSIG_SECRET`
-    /// and, optionally, `RFC2136_TSIG_ALGORITHM` (defaults to `hmac-sha256`).
+    /// and, optionally, `RFC2136_TSIG_ALGORITHM` (defaults to `hmac-sha256`)
+    /// and `RFC2136_ZONE` (see [`Rfc2136Config::with_zone`]). Each may be read
+    /// from the file its `_FILE` variable names instead.
     pub fn from_env() -> Result<Self, DnsError> {
-        let nameserver = env_required(&[ENV_NAMESERVER])?;
-        let key_name = env_required(&[ENV_TSIG_KEY])?;
-        let secret = env_required(&[ENV_TSIG_SECRET])?;
+        Self::from_lookup(&process_env)
+    }
+
+    /// [`Self::from_env`], the variables read through `lookup`.
+    pub(crate) fn from_lookup(lookup: Lookup<'_>) -> Result<Self, DnsError> {
+        let nameserver = env_required(lookup, &[ENV_NAMESERVER])?;
+        let key_name = env_required(lookup, &[ENV_TSIG_KEY])?;
+        let secret = env_required(lookup, &[ENV_TSIG_SECRET])?;
         let mut config = Rfc2136Config::new(nameserver, key_name, secret);
-        if let Some(algorithm) = env_value(&[ENV_TSIG_ALGORITHM])? {
+        if let Some(algorithm) = env_value(lookup, &[ENV_TSIG_ALGORITHM])? {
             config = config.with_algorithm(algorithm.parse()?);
+        }
+        if let Some(zone) = env_value(lookup, &[ENV_ZONE])? {
+            config = config.with_zone(zone)?;
         }
         Self::new(config)
     }

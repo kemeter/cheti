@@ -4,7 +4,7 @@ use std::time::Duration;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
-use super::common::env_required;
+use super::common::{env_required, process_env, Lookup};
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
@@ -104,7 +104,12 @@ impl HetznerProvider {
 
     /// Builds the provider from `HETZNER_API_TOKEN`.
     pub fn from_env() -> Result<Self, DnsError> {
-        let token = env_required(&[ENV_TOKEN])?;
+        Self::from_lookup(&process_env)
+    }
+
+    /// [`Self::from_env`], the variables read through `lookup`.
+    pub(crate) fn from_lookup(lookup: Lookup<'_>) -> Result<Self, DnsError> {
+        let token = env_required(lookup, &[ENV_TOKEN])?;
         Self::new(HetznerConfig::new(token))
     }
 

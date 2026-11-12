@@ -4,7 +4,7 @@ use std::time::Duration;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
-use super::common::env_required;
+use super::common::{env_required, process_env, Lookup};
 use crate::dns::find_zone;
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
@@ -98,7 +98,12 @@ impl ScalewayProvider {
     /// Builds the provider from `SCW_SECRET_KEY`, or lego's `SCALEWAY_API_TOKEN`.
     /// Each may be read from the file its `_FILE` variable names instead.
     pub fn from_env() -> Result<Self, DnsError> {
-        let key = env_required(&[ENV_SECRET_KEY, "SCALEWAY_API_TOKEN"])?;
+        Self::from_lookup(&process_env)
+    }
+
+    /// [`Self::from_env`], the variables read through `lookup`.
+    pub(crate) fn from_lookup(lookup: Lookup<'_>) -> Result<Self, DnsError> {
+        let key = env_required(lookup, &[ENV_SECRET_KEY, "SCALEWAY_API_TOKEN"])?;
         Self::new(ScalewayConfig::new(key))
     }
 

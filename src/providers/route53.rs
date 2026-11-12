@@ -10,7 +10,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use url::Url;
 
-use super::common::{env_required, env_value};
+use super::common::{env_required, env_value, process_env, Lookup};
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
@@ -159,10 +159,15 @@ impl Route53Provider {
     /// Reads `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and the optional
     /// `AWS_SESSION_TOKEN`.
     pub fn from_env() -> Result<Self, DnsError> {
-        let access_key_id = env_required(&[ENV_ACCESS_KEY_ID])?;
-        let secret_access_key = env_required(&[ENV_SECRET_ACCESS_KEY])?;
+        Self::from_lookup(&process_env)
+    }
+
+    /// [`Self::from_env`], the variables read through `lookup`.
+    pub(crate) fn from_lookup(lookup: Lookup<'_>) -> Result<Self, DnsError> {
+        let access_key_id = env_required(lookup, &[ENV_ACCESS_KEY_ID])?;
+        let secret_access_key = env_required(lookup, &[ENV_SECRET_ACCESS_KEY])?;
         let mut config = Route53Config::new(access_key_id, secret_access_key);
-        if let Some(token) = env_value(&[ENV_SESSION_TOKEN])? {
+        if let Some(token) = env_value(lookup, &[ENV_SESSION_TOKEN])? {
             if !token.is_empty() {
                 config = config.with_session_token(token);
             }

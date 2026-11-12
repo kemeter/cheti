@@ -61,23 +61,46 @@ pub const NAMES: &[&str] = &[
 /// may be read from the file its `<NAME>_FILE` variable names instead, as
 /// Docker and Kubernetes secrets are mounted.
 pub fn from_env(name: &str) -> Result<Box<dyn DnsProvider>, DnsError> {
+    build(name, &common::process_env)
+}
+
+/// [`from_env`], each variable read through `lookup` rather than from the
+/// process's environment: to take a variable under another name (a second
+/// account's token), or a value from configuration.
+///
+/// ```
+/// // The token of a second Cloudflare account, under a name of its own.
+/// let provider = cheti::providers::from_env_with("cloudflare", |var| match var {
+///     "CLOUDFLARE_API_TOKEN" => std::env::var("CF_TOKEN_ACCOUNT_B").ok(),
+///     other => std::env::var(other).ok(),
+/// });
+/// # let _ = provider;
+/// ```
+pub fn from_env_with(
+    name: &str,
+    lookup: impl Fn(&str) -> Option<String>,
+) -> Result<Box<dyn DnsProvider>, DnsError> {
+    build(name, &lookup)
+}
+
+fn build(name: &str, lookup: common::Lookup<'_>) -> Result<Box<dyn DnsProvider>, DnsError> {
     let provider: Box<dyn DnsProvider> = match name.to_ascii_lowercase().as_str() {
-        "bunny" => Box::new(bunny::BunnyProvider::from_env()?),
-        "cloudflare" => Box::new(cloudflare::CloudflareProvider::from_env()?),
-        "desec" => Box::new(desec::DesecProvider::from_env()?),
-        "digitalocean" => Box::new(digitalocean::DigitalOceanProvider::from_env()?),
-        "gandi" | "gandiv5" => Box::new(gandi::GandiProvider::from_env()?),
-        "google_cloud_dns" | "gcloud" => {
-            Box::new(google_cloud_dns::GoogleCloudDnsProvider::from_env()?)
-        }
-        "hetzner" => Box::new(hetzner::HetznerProvider::from_env()?),
-        "infomaniak" => Box::new(infomaniak::InfomaniakProvider::from_env()?),
-        "ovh" => Box::new(ovh::OvhProvider::from_env()?),
-        "porkbun" => Box::new(porkbun::PorkbunProvider::from_env()?),
-        "powerdns" | "pdns" => Box::new(powerdns::PowerDnsProvider::from_env()?),
-        "rfc2136" => Box::new(rfc2136::Rfc2136Provider::from_env()?),
-        "route53" => Box::new(route53::Route53Provider::from_env()?),
-        "scaleway" => Box::new(scaleway::ScalewayProvider::from_env()?),
+        "bunny" => Box::new(bunny::BunnyProvider::from_lookup(lookup)?),
+        "cloudflare" => Box::new(cloudflare::CloudflareProvider::from_lookup(lookup)?),
+        "desec" => Box::new(desec::DesecProvider::from_lookup(lookup)?),
+        "digitalocean" => Box::new(digitalocean::DigitalOceanProvider::from_lookup(lookup)?),
+        "gandi" | "gandiv5" => Box::new(gandi::GandiProvider::from_lookup(lookup)?),
+        "google_cloud_dns" | "gcloud" => Box::new(
+            google_cloud_dns::GoogleCloudDnsProvider::from_lookup(lookup)?,
+        ),
+        "hetzner" => Box::new(hetzner::HetznerProvider::from_lookup(lookup)?),
+        "infomaniak" => Box::new(infomaniak::InfomaniakProvider::from_lookup(lookup)?),
+        "ovh" => Box::new(ovh::OvhProvider::from_lookup(lookup)?),
+        "porkbun" => Box::new(porkbun::PorkbunProvider::from_lookup(lookup)?),
+        "powerdns" | "pdns" => Box::new(powerdns::PowerDnsProvider::from_lookup(lookup)?),
+        "rfc2136" => Box::new(rfc2136::Rfc2136Provider::from_lookup(lookup)?),
+        "route53" => Box::new(route53::Route53Provider::from_lookup(lookup)?),
+        "scaleway" => Box::new(scaleway::ScalewayProvider::from_lookup(lookup)?),
         _ => {
             return Err(DnsError::Other(format!(
                 "unknown DNS provider `{name}`: expected one of {}",
@@ -105,7 +128,7 @@ mod tests {
         let _env = lock();
         std::env::set_var("CHETI_TEST_DIRECT", "direct");
         assert_eq!(
-            common::env_value(&["CHETI_TEST_DIRECT"])
+            common::env_value(&common::process_env, &["CHETI_TEST_DIRECT"])
                 .unwrap()
                 .as_deref(),
             Some("direct")
@@ -117,7 +140,7 @@ mod tests {
         std::fs::write(&file, "from-file\n").unwrap();
         std::env::set_var("CHETI_TEST_SECRET_FILE", &file);
         assert_eq!(
-            common::env_value(&["CHETI_TEST_SECRET"])
+            common::env_value(&common::process_env, &["CHETI_TEST_SECRET"])
                 .unwrap()
                 .as_deref(),
             Some("from-file")
@@ -134,9 +157,12 @@ mod tests {
         std::env::set_var("CHETI_TEST_FIRST", "");
         std::env::set_var("CHETI_TEST_SECOND", "second");
         assert_eq!(
-            common::env_value(&["CHETI_TEST_FIRST", "CHETI_TEST_SECOND"])
-                .unwrap()
-                .as_deref(),
+            common::env_value(
+                &common::process_env,
+                &["CHETI_TEST_FIRST", "CHETI_TEST_SECOND"]
+            )
+            .unwrap()
+            .as_deref(),
             Some("second")
         );
         std::env::remove_var("CHETI_TEST_FIRST");
@@ -146,7 +172,11 @@ mod tests {
     #[test]
     fn a_missing_variable_names_every_accepted_one() {
         let _env = lock();
-        let err = common::env_required(&["CHETI_TEST_NONE", "CHETI_TEST_ALIAS"]).unwrap_err();
+        let err = common::env_required(
+            &common::process_env,
+            &["CHETI_TEST_NONE", "CHETI_TEST_ALIAS"],
+        )
+        .unwrap_err();
         let message = err.to_string();
         for name in [
             "CHETI_TEST_NONE",
@@ -162,7 +192,7 @@ mod tests {
     fn an_unreadable_file_is_an_error() {
         let _env = lock();
         std::env::set_var("CHETI_TEST_GONE_FILE", "/nonexistent/cheti/secret");
-        assert!(common::env_value(&["CHETI_TEST_GONE"]).is_err());
+        assert!(common::env_value(&common::process_env, &["CHETI_TEST_GONE"]).is_err());
         std::env::remove_var("CHETI_TEST_GONE_FILE");
     }
 
@@ -182,6 +212,27 @@ mod tests {
         assert!(from_env("powerdns").is_ok());
         std::env::remove_var("PDNS_API_URL");
         std::env::remove_var("PDNS_API_KEY");
+    }
+
+    /// Through a lookup, a variable can come under another name, without
+    /// touching the process's environment.
+    #[test]
+    fn a_provider_is_built_through_a_lookup() {
+        let lookup = |var: &str| match var {
+            "OVH_APPLICATION_KEY" => Some("ak".to_string()),
+            "OVH_APPLICATION_SECRET" => Some("as".to_string()),
+            "OVH_CONSUMER_KEY" => Some("ck".to_string()),
+            "OVH_ENDPOINT" => Some("ovh-ca".to_string()),
+            _ => None,
+        };
+        assert!(from_env_with("ovh", lookup).is_ok());
+        let missing = from_env_with("ovh", |_| None).err().unwrap().to_string();
+        assert!(missing.contains("OVH_APPLICATION_KEY"), "{missing}");
+        let bad_endpoint = from_env_with("ovh", |var| match var {
+            "OVH_ENDPOINT" => Some("ovh-asia".to_string()),
+            other => lookup(other),
+        });
+        assert!(bad_endpoint.is_err());
     }
 
     #[test]

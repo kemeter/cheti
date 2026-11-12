@@ -14,7 +14,7 @@ use serde_json::Value;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::time::Instant;
 
-use super::common::{env_required, env_value};
+use super::common::{env_required, env_value, process_env, Lookup};
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
@@ -247,15 +247,20 @@ impl GoogleCloudDnsProvider {
     /// lego's `GCE_PROJECT` overrides the key's project. Each may be read
     /// from the file its `_FILE` variable names instead.
     pub fn from_env() -> Result<Self, DnsError> {
+        Self::from_lookup(&process_env)
+    }
+
+    /// [`Self::from_env`], the variables read through `lookup`.
+    pub(crate) fn from_lookup(lookup: Lookup<'_>) -> Result<Self, DnsError> {
         // The key itself, as lego takes it, or else a path to it.
-        let mut config = match env_value(&[ENV_LEGO_CREDENTIALS])? {
+        let mut config = match env_value(lookup, &[ENV_LEGO_CREDENTIALS])? {
             Some(json) => GoogleCloudDnsConfig::from_service_account_json(&json)?,
             None => {
-                let path = env_required(&[ENV_CREDENTIALS, ENV_LEGO_CREDENTIALS_FILE])?;
+                let path = env_required(lookup, &[ENV_CREDENTIALS, ENV_LEGO_CREDENTIALS_FILE])?;
                 GoogleCloudDnsConfig::from_service_account_file(path)?
             }
         };
-        if let Some(project) = env_value(&[ENV_LEGO_PROJECT])? {
+        if let Some(project) = env_value(lookup, &[ENV_LEGO_PROJECT])? {
             config = config.with_project(project)?;
         }
         Self::new(config)

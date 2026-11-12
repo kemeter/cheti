@@ -6,7 +6,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 
-use super::common::{env_required, env_value};
+use super::common::{env_required, env_value, process_env, Lookup};
 use crate::dns::find_zone;
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
@@ -141,11 +141,16 @@ impl OvhProvider {
     /// unless set, see [`OvhConfig::with_endpoint`]). Each may be read from
     /// the file its `_FILE` variable names instead.
     pub fn from_env() -> Result<Self, DnsError> {
-        let ak = env_required(&[ENV_APP_KEY])?;
-        let asec = env_required(&[ENV_APP_SECRET])?;
-        let ck = env_required(&[ENV_CONSUMER_KEY])?;
+        Self::from_lookup(&process_env)
+    }
+
+    /// [`Self::from_env`], the variables read through `lookup`.
+    pub(crate) fn from_lookup(lookup: Lookup<'_>) -> Result<Self, DnsError> {
+        let ak = env_required(lookup, &[ENV_APP_KEY])?;
+        let asec = env_required(lookup, &[ENV_APP_SECRET])?;
+        let ck = env_required(lookup, &[ENV_CONSUMER_KEY])?;
         let mut config = OvhConfig::new(ak, asec, ck);
-        if let Some(endpoint) = env_value(&[ENV_ENDPOINT])? {
+        if let Some(endpoint) = env_value(lookup, &[ENV_ENDPOINT])? {
             config = config.with_endpoint(&endpoint)?;
         }
         Self::new(config)

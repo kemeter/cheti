@@ -6,7 +6,7 @@ use std::time::Duration;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
-use super::common::{env_required, env_value};
+use super::common::{env_required, env_value, process_env, Lookup};
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
@@ -126,10 +126,15 @@ impl PowerDnsProvider {
     /// `PDNS_SERVER_NAME`. Each may be read from the file its `_FILE` variable
     /// names instead.
     pub fn from_env() -> Result<Self, DnsError> {
-        let api_url = env_required(&[ENV_API_URL, "PDNS_API_URL"])?;
-        let api_key = env_required(&[ENV_API_KEY, "PDNS_API_KEY"])?;
+        Self::from_lookup(&process_env)
+    }
+
+    /// [`Self::from_env`], the variables read through `lookup`.
+    pub(crate) fn from_lookup(lookup: Lookup<'_>) -> Result<Self, DnsError> {
+        let api_url = env_required(lookup, &[ENV_API_URL, "PDNS_API_URL"])?;
+        let api_key = env_required(lookup, &[ENV_API_KEY, "PDNS_API_KEY"])?;
         let mut config = PowerDnsConfig::new(api_url, api_key)?;
-        if let Some(server_id) = env_value(&[ENV_SERVER_ID, "PDNS_SERVER_NAME"])? {
+        if let Some(server_id) = env_value(lookup, &[ENV_SERVER_ID, "PDNS_SERVER_NAME"])? {
             config = config.with_server_id(server_id)?;
         }
         Self::new(config)

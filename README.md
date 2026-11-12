@@ -95,6 +95,8 @@ Bunny DNS, DigitalOcean, Google Cloud DNS, Hetzner, Infomaniak, Porkbun, PowerDN
 let provider = cheti::providers::from_env("route53").unwrap();
 ```
 
+`cheti::providers::from_env_with(name, lookup)` reads each variable through `lookup` instead of the process's environment: to take a second account's token under a name of its own, or values from configuration.
+
 The name is compared without case, and lego's name for a provider is taken too. Each provider reads cheti's variable names and lego's where they differ, so the variables of a Traefik or lego setup work as they are. Every variable may be read from a file instead: `CLOUDFLARE_API_TOKEN_FILE=/run/secrets/cloudflare` reads the token from that file, as Docker and Kubernetes secrets are mounted.
 
 | Name | lego's | Variables (lego's, where they differ) |
@@ -110,7 +112,7 @@ The name is compared without case, and lego's name for a provider is taken too. 
 | `ovh` | | `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`, optional `OVH_ENDPOINT` (`ovh-eu`, `ovh-ca`, `ovh-us`, `kimsufi-eu`, `kimsufi-ca`, `soyoustart-eu`, `soyoustart-ca`) |
 | `porkbun` | | `PORKBUN_API_KEY`, `PORKBUN_SECRET_API_KEY` |
 | `powerdns` | `pdns` | `POWERDNS_API_URL`, `POWERDNS_API_KEY`, optional `POWERDNS_SERVER_ID` (`PDNS_API_URL`, `PDNS_API_KEY`, `PDNS_SERVER_NAME`) |
-| `rfc2136` | | `RFC2136_NAMESERVER`, `RFC2136_TSIG_KEY`, `RFC2136_TSIG_SECRET`, optional `RFC2136_TSIG_ALGORITHM` |
+| `rfc2136` | | `RFC2136_NAMESERVER`, `RFC2136_TSIG_KEY`, `RFC2136_TSIG_SECRET`, optional `RFC2136_TSIG_ALGORITHM` and `RFC2136_ZONE` |
 | `route53` | | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, optional `AWS_SESSION_TOKEN` |
 | `scaleway` | | `SCW_SECRET_KEY` (`SCALEWAY_API_TOKEN`) |
 

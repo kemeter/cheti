@@ -4,7 +4,7 @@ use std::time::Duration;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
-use super::common::env_required;
+use super::common::{env_required, process_env, Lookup};
 use crate::dns::find_zone;
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
@@ -104,7 +104,12 @@ impl DigitalOceanProvider {
     /// Builds the provider from `DIGITALOCEAN_TOKEN`, or lego's `DO_AUTH_TOKEN`.
     /// Each may be read from the file its `_FILE` variable names instead.
     pub fn from_env() -> Result<Self, DnsError> {
-        let token = env_required(&[ENV_TOKEN, "DO_AUTH_TOKEN"])?;
+        Self::from_lookup(&process_env)
+    }
+
+    /// [`Self::from_env`], the variables read through `lookup`.
+    pub(crate) fn from_lookup(lookup: Lookup<'_>) -> Result<Self, DnsError> {
+        let token = env_required(lookup, &[ENV_TOKEN, "DO_AUTH_TOKEN"])?;
         Self::new(DigitalOceanConfig::new(token))
     }
 
