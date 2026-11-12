@@ -87,6 +87,35 @@ HTTP providers retry a throttled request (429), and an idempotent request the se
 
 Bunny DNS, DigitalOcean, Google Cloud DNS, Hetzner, Infomaniak, Porkbun, PowerDNS and Route53 are tested against mocks of their documented APIs but have not yet been exercised against the live services. Reports from real accounts are welcome.
 
+### Picking a provider by name
+
+`cheti::providers::from_env(name)` builds a provider from its name and its environment variables, as Traefik and lego pick one from a name alone: an application can offer every provider through one `provider: <name>` setting, and gets the next ones by upgrading cheti.
+
+```rust,no_run
+let provider = cheti::providers::from_env("route53").unwrap();
+```
+
+`cheti::providers::from_env_with(name, lookup)` reads each variable through `lookup` instead of the process's environment: to take a second account's token under a name of its own, or values from configuration.
+
+The name is compared without case, and lego's name for a provider is taken too. Each provider reads cheti's variable names and lego's where they differ, so the variables of a Traefik or lego setup work as they are. Every variable may be read from a file instead: `CLOUDFLARE_API_TOKEN_FILE=/run/secrets/cloudflare` reads the token from that file, as Docker and Kubernetes secrets are mounted.
+
+| Name | lego's | Variables (lego's, where they differ) |
+|---|---|---|
+| `bunny` | | `BUNNY_API_KEY` |
+| `cloudflare` | | `CLOUDFLARE_API_TOKEN` (`CF_DNS_API_TOKEN`, `CLOUDFLARE_DNS_API_TOKEN`) |
+| `desec` | | `DESEC_TOKEN` |
+| `digitalocean` | | `DIGITALOCEAN_TOKEN` (`DO_AUTH_TOKEN`) |
+| `gandi` | `gandiv5` | `GANDIV5_PERSONAL_ACCESS_TOKEN` |
+| `google_cloud_dns` | `gcloud` | `GOOGLE_APPLICATION_CREDENTIALS`, a key file's path (`GCE_SERVICE_ACCOUNT_FILE`, or `GCE_SERVICE_ACCOUNT` for the key itself; `GCE_PROJECT`) |
+| `hetzner` | | `HETZNER_API_TOKEN` |
+| `infomaniak` | | `INFOMANIAK_ACCESS_TOKEN` |
+| `ovh` | | `OVH_APPLICATION_KEY`, `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY`, optional `OVH_ENDPOINT` (`ovh-eu`, `ovh-ca`, `ovh-us`, `kimsufi-eu`, `kimsufi-ca`, `soyoustart-eu`, `soyoustart-ca`) |
+| `porkbun` | | `PORKBUN_API_KEY`, `PORKBUN_SECRET_API_KEY` |
+| `powerdns` | `pdns` | `POWERDNS_API_URL`, `POWERDNS_API_KEY`, optional `POWERDNS_SERVER_ID` (`PDNS_API_URL`, `PDNS_API_KEY`, `PDNS_SERVER_NAME`) |
+| `rfc2136` | | `RFC2136_NAMESERVER`, `RFC2136_TSIG_KEY`, `RFC2136_TSIG_SECRET`, optional `RFC2136_TSIG_ALGORITHM` and `RFC2136_ZONE` |
+| `route53` | | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, optional `AWS_SESSION_TOKEN` |
+| `scaleway` | | `SCW_SECRET_KEY` (`SCALEWAY_API_TOKEN`) |
+
 ### Bunny DNS
 
 Account API key from the bunny.net dashboard (`Account settings` → `API`), sent in the `AccessKey` header. The zone is resolved through the API: the account zone whose domain is the longest suffix of the FQDN wins, so delegated sub-zones are supported and no SOA lookup is needed. `with_zone` selects a zone by its domain name instead. Each challenge value is stored as its own TXT record (TTL 60s), so a wildcard and an apex challenge on the same name don't interfere, and cleanup only deletes the record holding its own value.

@@ -288,6 +288,58 @@ pub(crate) fn truncate_error_body(raw: String) -> String {
     truncated
 }
 
+/// Reads an environment variable by name: the process's own environment,
+/// or whatever stands for it.
+pub(crate) type Lookup<'a> = &'a dyn Fn(&str) -> Option<String>;
+
+/// The process's environment, as a [`Lookup`].
+pub(crate) fn process_env(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
+/// The value of the first of `names` that `lookup` has, in order: the
+/// variable itself, or else the file its `<NAME>_FILE` variable names, as
+/// Docker and Kubernetes secrets are mounted, its trailing newline dropped.
+/// A variable set empty counts as unset. `None` when none is set.
+///
+/// `names` lists cheti's name first, then lego's when it differs, so the
+/// variables of a Traefik or lego setup work as they are.
+pub(crate) fn env_value(lookup: Lookup<'_>, names: &[&str]) -> Result<Option<String>, DnsError> {
+    for name in names {
+        if let Some(value) = lookup(name) {
+            if !value.is_empty() {
+                return Ok(Some(value));
+            }
+        }
+        let file_var = format!("{name}_FILE");
+        if let Some(path) = lookup(&file_var) {
+            if path.is_empty() {
+                continue;
+            }
+            let content = std::fs::read_to_string(&path).map_err(|e| {
+                DnsError::MissingCredentials(format!("{file_var}: cannot read {path}: {e}"))
+            })?;
+            let value = content.trim_end_matches(['\n', '\r']).to_string();
+            if !value.is_empty() {
+                return Ok(Some(value));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// [`env_value`], required: `MissingCredentials` naming every variable
+/// that would have done when none is set.
+pub(crate) fn env_required(lookup: Lookup<'_>, names: &[&str]) -> Result<String, DnsError> {
+    env_value(lookup, names)?.ok_or_else(|| {
+        let accepted: Vec<String> = names
+            .iter()
+            .flat_map(|n| [n.to_string(), format!("{n}_FILE")])
+            .collect();
+        DnsError::MissingCredentials(accepted.join(" or "))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;

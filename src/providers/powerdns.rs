@@ -1,12 +1,12 @@
 use async_trait::async_trait;
 use std::collections::HashMap;
-use std::env;
 use std::sync::Mutex;
 use std::time::Duration;
 
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
+use super::common::{env_required, env_value, process_env, Lookup};
 use crate::error::DnsError;
 use crate::provider::DnsProvider;
 use crate::providers::common::{
@@ -122,14 +122,19 @@ impl PowerDnsProvider {
     }
 
     /// Builds the provider from `POWERDNS_API_URL`, `POWERDNS_API_KEY` and, optionally,
-    /// `POWERDNS_SERVER_ID`.
+    /// `POWERDNS_SERVER_ID`, or lego's `PDNS_API_URL`, `PDNS_API_KEY` and
+    /// `PDNS_SERVER_NAME`. Each may be read from the file its `_FILE` variable
+    /// names instead.
     pub fn from_env() -> Result<Self, DnsError> {
-        let api_url =
-            env::var(ENV_API_URL).map_err(|_| DnsError::MissingCredentials(ENV_API_URL.into()))?;
-        let api_key =
-            env::var(ENV_API_KEY).map_err(|_| DnsError::MissingCredentials(ENV_API_KEY.into()))?;
+        Self::from_lookup(&process_env)
+    }
+
+    /// [`Self::from_env`], the variables read through `lookup`.
+    pub(crate) fn from_lookup(lookup: Lookup<'_>) -> Result<Self, DnsError> {
+        let api_url = env_required(lookup, &[ENV_API_URL, "PDNS_API_URL"])?;
+        let api_key = env_required(lookup, &[ENV_API_KEY, "PDNS_API_KEY"])?;
         let mut config = PowerDnsConfig::new(api_url, api_key)?;
-        if let Ok(server_id) = env::var(ENV_SERVER_ID) {
+        if let Some(server_id) = env_value(lookup, &[ENV_SERVER_ID, "PDNS_SERVER_NAME"])? {
             config = config.with_server_id(server_id)?;
         }
         Self::new(config)

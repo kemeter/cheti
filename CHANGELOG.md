@@ -6,6 +6,24 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `providers::from_env(name)`, building a provider from its name and its
+  environment variables, as Traefik and lego pick one from a name alone.
+  It takes lego's names for providers too (`gandiv5`, `pdns`, `gcloud`);
+  `providers::NAMES` lists them. `providers::from_env_with` reads the
+  variables through a function instead, to take one under another name or
+  from configuration.
+- `RFC2136_ZONE` in `Rfc2136Provider::from_env`.
+- Every provider's `from_env` reads lego's variable names where they differ
+  from cheti's (`CF_DNS_API_TOKEN`, `DO_AUTH_TOKEN`, `PDNS_*`,
+  `SCALEWAY_API_TOKEN`, `GCE_SERVICE_ACCOUNT`, `GCE_SERVICE_ACCOUNT_FILE`,
+  `GCE_PROJECT`), and each variable from the file its `<NAME>_FILE` variable
+  names, as Docker and Kubernetes secrets are mounted.
+- `OvhConfig::with_endpoint`, taking an endpoint by name as OVH's SDKs and
+  lego do (`ovh-eu`, `ovh-ca`, `ovh-us`, `kimsufi-*`, `soyoustart-*`), and
+  `OVH_ENDPOINT` in `OvhProvider::from_env`.
+
 ## [0.1.1] - 2026-11-06
 
 ### Added
