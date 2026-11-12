@@ -6,7 +6,7 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.1.2] - 2026-11-12
+## [0.2.0] - 2026-11-12
 
 ### Added
 
@@ -30,6 +30,11 @@ project follows [Semantic Versioning](https://semver.org/).
 - `OvhConfig::with_endpoint`, taking an endpoint by name as OVH's SDKs and
   lego do (`ovh-eu`, `ovh-ca`, `ovh-us`, `kimsufi-*`, `soyoustart-*`), and
   `OVH_ENDPOINT` in `OvhProvider::from_env`.
+
+## [0.1.2] - 2026-11-12 [YANKED]
+
+Same changes as 0.2.0, which republishes them as a minor version since
+they add public API.
 
 ## [0.1.1] - 2026-11-06
 
@@ -68,7 +73,8 @@ First release.
 - `testing` feature exposing `MockDnsProvider` and `MockChallengeResponder`.
 - Minimum supported Rust version: 1.89.
 
-[Unreleased]: https://github.com/kemeter/cheti/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/kemeter/cheti/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/kemeter/cheti/compare/v0.1.1...v0.2.0
 [0.1.2]: https://github.com/kemeter/cheti/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/kemeter/cheti/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/kemeter/cheti/releases/tag/v0.1.0

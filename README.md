@@ -24,7 +24,7 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cheti = "0.1"
+cheti = "0.2"
 instant-acme = "0.8"
 tokio = { version = "1", features = ["full"] }
 ```
